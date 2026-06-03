@@ -42,12 +42,12 @@ extension:
   # Human-readable name surfaced in `specify extension list` and the
   # community catalog. Keeping the `speckit-` prefix here makes the
   # extension's purpose obvious in operator-facing surfaces.
-  name: "spec-kit-linear"
+  name: "spec-kit-linear-sync"
 
   # PEP 440 version. We are pre-release while the v1 implementation is
   # being built out under specs/001-spec-kit-linear-bridge/. Bumped to a
   # stable 0.1.0 when the bridge actually ships an end-to-end reconcile.
-  version: "0.2.0"
+  version: "0.2.1"
 
   # One-line description — matches the GitHub repo description so the
   # catalog entry and the README cover read the same way.
@@ -55,9 +55,9 @@ extension:
 
   # Optional fields — author + repo make the manifest self-describing.
   author: "Ash Brener"
-  repository: "https://github.com/ashbrener/spec-kit-linear"
+  repository: "https://github.com/ashbrener/spec-kit-linear-sync"
   license: "MIT"
-  homepage: "https://github.com/ashbrener/spec-kit-linear"
+  homepage: "https://github.com/ashbrener/spec-kit-linear-sync"
 
 # ---------------------------------------------------------------------------
 # `requires:` — runtime preconditions the CLI validates at install.

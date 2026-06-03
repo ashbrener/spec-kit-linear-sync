@@ -2,8 +2,8 @@
 
 **Keep Linear in sync with your spec-driven project, automatically.** Every spec on disk becomes a Linear issue (and every task phase a sub-issue), so you can see — and steer — every active spec across every repo from one place. You keep working in your files as usual; the bridge mirrors them into Linear for you and keeps it current as you plan, build, and merge. Your files stay the single source of truth — Linear is the always-up-to-date view, never something you edit by hand.
 
-- **Version:** 0.2.0
-- **Repository:** <https://github.com/ashbrener/spec-kit-linear>
+- **Version:** 0.2.1
+- **Repository:** <https://github.com/ashbrener/spec-kit-linear-sync>
 - **License:** MIT
 - **Requires:** Spec Kit ≥ 0.1.0 · bash 4+ · `curl` · `jq` · `gh` (optional) · `git`
 - **Commands:** `/speckit.linear.install`, `/speckit.linear.seed`, `/speckit.linear.push`, `/speckit.linear.pull`, `/speckit.linear.status` (auto-invoked on every `/speckit.*` lifecycle command)
@@ -53,13 +53,13 @@ graph TD
 Until this extension lands in the spec-kit community catalog, install from the GitHub archive URL (the CLI's `--from` flag expects a direct ZIP, not a repo URL):
 
 ```bash
-specify extension add linear --from https://github.com/ashbrener/spec-kit-linear/archive/refs/heads/main.zip
+specify extension add linear --from https://github.com/ashbrener/spec-kit-linear-sync/archive/refs/heads/main.zip
 ```
 
 Or install from a local checkout (symlinks rather than copies, so your local edits flow through):
 
 ```bash
-specify extension add /path/to/spec-kit-linear --dev
+specify extension add /path/to/spec-kit-linear-sync --dev
 ```
 
 Run this from a **separate consumer repo**, not from inside the bridge's own checkout. The install detects source-equals-target and halts with exit 2 (FR-046) rather than copy the bridge into itself.

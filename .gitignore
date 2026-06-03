@@ -24,6 +24,10 @@ Thumbs.db
 
 # Claude Code local-only settings (skills under .claude/skills/ are tracked)
 .claude/settings.local.json
+# Local operator dogfood slash commands — hardcode an absolute path + assume a
+# real .env; convenience only, not a product surface (the product path is the
+# extension's generated consumer skills). Keep local.
+.claude/commands/
 # Agent worktrees — ephemeral, isolated checkouts; never committed
 .claude/worktrees/
 # Local MCP server wiring — machine-specific
