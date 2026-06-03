@@ -716,7 +716,14 @@ pull::emit_human() {
         local col_id col_nnn col_phase col_state col_est col_assignee col_last col_title
         while IFS= read -r row; do
             [[ -z "$row" ]] && continue
-            IFS=$'\t' read -r col_id col_nnn col_phase col_state col_est col_assignee col_last col_title <<<"$row"
+            # `@tsv` emits real tabs ONLY between fields (tabs inside a field are
+            # escaped to \t), so swap them for a non-whitespace unit separator
+            # before splitting. `IFS=$'\t' read` collapses empty fields because
+            # tab is IFS-WHITESPACE — an empty PHASE/EST cell would swallow a tab
+            # and shift every later column left (the alignment bug). US (0x1f) is
+            # non-whitespace, so `read` preserves empty fields.
+            local row_us="${row//$'\t'/$'\037'}"
+            IFS=$'\037' read -r col_id col_nnn col_phase col_state col_est col_assignee col_last col_title <<<"$row_us"
             local phase_coloured
             case "$col_phase" in
                 specifying|clarifying|planning|tasking|red_team)
