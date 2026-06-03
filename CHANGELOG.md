@@ -1,11 +1,27 @@
 # Changelog
 
-All notable changes to **spec-kit-linear** are recorded here.
+All notable changes to **spec-kit-linear-sync** are recorded here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.2.1] — 2026-06-03 — Rename to spec-kit-linear-sync + pull alignment fix
+
+Branding/metadata release: the repo and extension display name become
+**`spec-kit-linear-sync`**, joining the `spec-kit-<tracker>-sync` family. No
+behavior change — `extension.id` stays `linear`, so the command surface
+(`/speckit.linear.*`) is unchanged, and GitHub redirects the old repo URL.
+
+- **Fixed (#31):** `speckit.linear.pull --human` misaligned every column when a
+  cell was empty (no `phase:*` label, `null` estimate) — `IFS=$'\t' read`
+  collapsed empty fields (tab is IFS-whitespace), shifting later columns left.
+  Now splits on a non-whitespace unit separator so empty fields are preserved.
+- **Changed:** repository renamed `spec-kit-linear` → `spec-kit-linear-sync`;
+  `extension.yml` `name`/`repository`/`homepage` updated. Functional identifiers
+  (command ids, FR-033 hook markers, spec paths, the GitHub Action filename) are
+  intentionally unchanged.
 
 ## [0.2.0] — 2026-05-31 — Drift-aware write-authority (spec 003)
 
