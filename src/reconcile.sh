@@ -101,13 +101,13 @@ readonly RECONCILE_CONFIG_PATH_DEFAULT=".specify/extensions/linear/linear-config
 
 # Cap on the verbatim Overview body before we truncate to the first
 # paragraph (split on `\n\n`) + ellipsis. Linear descriptions are
-# already long with the memory + diagrams blocks; keeping this under
+# already long with the memory block; keeping this under
 # 1500 chars preserves the at-a-glance value the block is meant to add.
 readonly RECONCILE_OVERVIEW_MAX_CHARS=1500
 
 # Bridge-owned description policy (FR-004, FR-016): the spec Issue's
 # description body is fully owned and rewritten by the bridge on every
-# reconcile, in canonical order: overview → memory → diagrams. There
+# reconcile, in canonical order: overview → memory. There
 # are no fence markers — Linear renders HTML comments and `<details>`
 # tags as visible text nodes (probed empirically on ACM-14), so any
 # fence shape would leak as literal markup in Linear's UI. Operator
@@ -169,16 +169,9 @@ declare -g _RECONCILE_AGENT_FAMILY=""
 declare -g _RECONCILE_AGENT_MODEL=""
 declare -g _RECONCILE_AGENT_RESOLVED=0
 
-# Diagrams-block "no GitHub remote" warning latch — same one-shot
-# pattern as the operator-assignee warning above. Flipped on the
-# first render_diagrams_block call that can't resolve a github.com
-# base URL so the warning fires once per reconcile rather than once
-# per spec.
-declare -g _RECONCILE_DIAGRAMS_WARNED=0
-
 # Overview-block "spec.md has no ## Overview section" warning latch —
-# same one-shot pattern as the operator-assignee / diagrams warnings
-# above. Flipped on the first render_overview_block call whose spec.md
+# same one-shot pattern as the operator-assignee warning above.
+# Flipped on the first render_overview_block call whose spec.md
 # lacks an `## Overview` heading so the warning fires once per
 # reconcile rather than once per spec.
 declare -g _RECONCILE_OVERVIEW_WARNED=0
@@ -788,7 +781,7 @@ reconcile::_extract_overview() {
 # Echo the consumer repo's https://github.com/<owner>/<repo> URL on
 # stdout, or empty when `git remote get-url origin` isn't a GitHub URL.
 # Mirrors the SSH-→-HTTPS rewrite logic already used by
-# reconcile::render_diagrams_block and reconcile::render_memory_block.
+# reconcile::render_memory_block.
 # Kept private (underscore prefix) so callers go through the public
 # render_* functions.
 # =============================================================================
@@ -890,64 +883,11 @@ EOF
 }
 
 # =============================================================================
-# reconcile::render_diagrams_block
-#
-# Build the markdown body for the spec Issue's `## Diagrams` block —
-# four bullet pointers at the consumer repo's README anchors. The
-# caller (compose_issue_description) concatenates this block into the
-# bridge-owned description body.
-#
-# The base URL is derived from `git remote get-url origin` and the
-# usual SSH-→-HTTPS rewrite. If the consumer repo's remote isn't
-# GitHub-shaped, the function echoes nothing (empty stdout) and the
-# caller treats that as "skip the diagrams block entirely". A summary
-# warning is emitted on first miss so the operator knows why the
-# block is missing rather than silently losing it.
-# =============================================================================
-reconcile::render_diagrams_block() {
-    local remote_url="" base_url=""
-    if remote_url="$(git remote get-url origin 2>/dev/null)"; then
-        if [[ "$remote_url" =~ ^git@([^:]+):(.+)\.git$ ]]; then
-            base_url="https://${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
-        elif [[ "$remote_url" =~ ^ssh://git@([^/]+)/(.+)\.git$ ]]; then
-            base_url="https://${BASH_REMATCH[1]}/${BASH_REMATCH[2]}"
-        elif [[ "$remote_url" =~ ^https?://(.+)\.git$ ]]; then
-            base_url="https://${BASH_REMATCH[1]}"
-        elif [[ "$remote_url" =~ ^https?://github\.com/.+ ]]; then
-            # Already an https URL without the trailing .git.
-            base_url="$remote_url"
-        fi
-    fi
-
-    if [[ -z "$base_url" || "$base_url" != *github.com* ]]; then
-        # Not a GitHub URL — bail with no output. The caller skips the
-        # block. We surface one warning per reconcile run so the
-        # operator knows the diagrams pointer was deliberately omitted.
-        if (( _RECONCILE_DIAGRAMS_WARNED == 0 )); then
-            summary::add warned "diagrams block skipped: \`git remote get-url origin\` did not resolve to a github.com URL"
-            _RECONCILE_DIAGRAMS_WARNED=1
-        fi
-        return 0
-    fi
-
-    cat <<EOF
-## Diagrams
-
-Visual references in the repo's README:
-
-- [How sync works](${base_url}#how-sync-works) — the everyday case / PR merge / escape hatches
-- [Data model](${base_url}#data-model) — structural hierarchy + content mapping
-- [Phase mapping](${base_url}#phase-mapping) — lifecycle state transitions
-- [Write authority across worktrees](${base_url}#write-authority-across-worktrees) — read vs write rules
-EOF
-}
-
-# =============================================================================
-# reconcile::compose_issue_description <overview_block> <memory_block> [<diagrams_block>]
+# reconcile::compose_issue_description <overview_block> <memory_block>
 #
 # Build the spec Issue description from scratch in canonical order:
 #
-#   overview → memory → diagrams
+#   overview → memory
 #
 # The bridge fully owns the description body (FR-004, FR-016): any
 # prior content in Linear is discarded on every reconcile. Operator
@@ -958,16 +898,14 @@ EOF
 # markup. The unidirectional, bridge-owned policy makes the per-fence
 # splice machinery unnecessary.
 #
-# <overview_block> and <diagrams_block> may be empty:
+# <overview_block> may be empty:
 #   - empty overview → no `## Overview` heading in spec.md
-#   - empty diagrams → consumer repo isn't on GitHub
-# In both cases we omit the block entirely (graceful degradation).
+# In that case we omit the block entirely (graceful degradation).
 # The memory block is mandatory.
 # =============================================================================
 reconcile::compose_issue_description() {
     local overview_block="$1"
     local memory_block="$2"
-    local diagrams_block="${3:-}"
 
     # Assemble in canonical order. Empty optional blocks are skipped;
     # memory is mandatory. Blocks are separated by a blank line.
@@ -976,9 +914,6 @@ reconcile::compose_issue_description() {
         result+="${overview_block}"$'\n\n'
     fi
     result+="${memory_block}"
-    if [[ -n "$diagrams_block" ]]; then
-        result+=$'\n\n'"${diagrams_block}"
-    fi
 
     # Trim trailing newlines for clean concatenation downstream.
     while [[ "$result" == *$'\n' ]]; do
@@ -1848,12 +1783,11 @@ reconcile::sync_spec_issue() {
         spec_estimate=""
     fi
 
-    # Compose the overview + memory + diagrams blocks into a final body.
-    local memory_block diagrams_block overview_block
+    # Compose the overview + memory blocks into a final body.
+    local memory_block overview_block
     memory_block="$(reconcile::render_memory_block \
         "$feature_number" "$short_name" "$lifecycle_phase" \
         "$spec_dir" "$feature_branch")"
-    diagrams_block="$(reconcile::render_diagrams_block)"
     overview_block="$(reconcile::render_overview_block "$spec_dir")"
 
     # Locate the existing spec Issue (FR-004b).
@@ -1868,7 +1802,7 @@ reconcile::sync_spec_issue() {
         # activity log.
         local description
         description="$(reconcile::compose_issue_description \
-            "$overview_block" "$memory_block" "$diagrams_block")"
+            "$overview_block" "$memory_block")"
 
         # Linear's IssueCreateInput requires `labelIds: [String!]`
         # (UUIDs) — names are rejected on the raw GraphQL path. We
@@ -1990,10 +1924,10 @@ reconcile::sync_spec_issue() {
 
     # Compute the desired description. The bridge owns the full body
     # (FR-004, FR-016): prior description content is discarded and the
-    # canonical overview + memory + diagrams blocks are emitted fresh.
+    # canonical overview + memory blocks are emitted fresh.
     local desired_description
     desired_description="$(reconcile::compose_issue_description \
-        "$overview_block" "$memory_block" "$diagrams_block")"
+        "$overview_block" "$memory_block")"
 
     # FR-036 co-binding: the `Last reconciled by` row's timestamp would
     # mutate the desired description on EVERY reconcile, defeating the
