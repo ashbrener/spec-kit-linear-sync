@@ -330,7 +330,10 @@ _drift_src='source "'"$SUMMARY_SH"'"; source "'"$RECONCILE_SH"'" 2>/dev/null'
   # prompt everywhere. We can't allocate a real TTY here, so we assert the
   # precedence directly: with ARG_ON_DRIFT=abort the function returns `abort`
   # WITHOUT ever consulting the prompt/tty (it would otherwise read stdin).
-  run bash -c "$_drift_src; ARG_ON_DRIFT=abort; printf 'p\n' | reconcile::_drift_disposition 005 'fired=1 phase_drift=1 recency_drift=0 signals=phase_ordering disk=planning linear=implementing'"
+  # Feed 'p' via a here-string, NOT a pipe: the function ignores stdin, and a
+  # piped writer racing an early-exiting reader gets SIGPIPE, which pipefail
+  # (inherited from the sourced reconcile.sh) turns into a flaky non-zero status.
+  run bash -c "$_drift_src; ARG_ON_DRIFT=abort; reconcile::_drift_disposition 005 'fired=1 phase_drift=1 recency_drift=0 signals=phase_ordering disk=planning linear=implementing' <<< 'p'"
   [ "$status" -eq 0 ]
   # `p` on stdin would mean proceed IF the prompt were consulted; abort proves
   # the flag short-circuited the prompt.
@@ -470,7 +473,9 @@ _prompt() {
   # proving the prompt does not consume the enumeration stdin.
   local tty_file="$BATS_TEST_TMPDIR/tty.$$"
   printf 'a\n' > "$tty_file"
-  run bash -c "$_drift_src; printf 'p\n' | { RECONCILE_DRIFT_TTY='$tty_file' reconcile::_drift_prompt 005 2>/dev/null; }"
+  # here-string, not a pipe: the prompt reads the tty seam and ignores stdin, so
+  # a piped writer would race the reader and flake on SIGPIPE under pipefail.
+  run bash -c "$_drift_src; { RECONCILE_DRIFT_TTY='$tty_file' reconcile::_drift_prompt 005 2>/dev/null; } <<< 'p'"
   [ "$status" -eq 0 ]
   [ "$output" = "abort" ]
 }
