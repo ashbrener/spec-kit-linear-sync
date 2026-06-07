@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-06-07 — Bug-fix round from community reports
+
+Fixes from the first wave of external issue reports (thanks @davieshq, @rcollette).
+No behavior changes beyond the fixes; `extension.id` stays `linear`.
+
+- **Fixed (#33, #39, #40):** seed no longer writes a duplicate `default_state_uuids`
+  key into `linear-config.yml`. The managed UUID blocks now update in place, so the
+  file stays valid (single-key) YAML and formats cleanly.
+- **Fixed (#36):** the reconcile summary now counts created issues/sub-issues
+  correctly (the counts were being lost to a subshell, so it reported `Created: 0`).
+- **Fixed (#35):** `pull` and `status` now surface the "malformed config" diagnostic
+  instead of exiting with a silent code 2.
+- **Fixed (#42):** removed the hardcoded README-anchor links from generated issue
+  descriptions — they only resolved against this repo, so they were dead links for
+  every consumer.
+- **Added (#34):** `push` now warns when it sees a `## Phase N` heading that isn't in
+  the `## Phase N:` form (previously those were skipped silently, yielding 0
+  sub-issues). Broadening which header styles are accepted is tracked separately.
+
 ## [0.2.1] — 2026-06-03 — Rename to spec-kit-linear-sync + pull alignment fix
 
 Branding/metadata release: the repo and extension display name become
