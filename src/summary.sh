@@ -69,7 +69,26 @@ set -euo pipefail
 # -----------------------------------------------------------------------------
 
 # Counter map, keyed by event type. Re-initialised by summary::start.
+#
+# NOTE (subshell durability — issue #36): bash associative arrays live in the
+# shell that declares them and are COPIED, never shared back, into any `$(…)`
+# command substitution. The reconciler creates issues/sub-issues inside deeply
+# nested command substitutions (reconcile::sync_spec_issue / …_subissues are
+# themselves `$(…)`-captured, and each calls reconcile::mutate_issue_create in
+# yet another `$(…)`), so every `summary::add created` increment happened in a
+# throwaway subshell and was lost before `summary::emit` ran in the parent —
+# the summary reported `Created: 0` even after creating issues. To make the
+# counts durable across subshell boundaries we ALSO append every event to an
+# on-disk tally file (one event type per line); summary::count / summary::emit
+# / summary::has_errors aggregate from that file so subshell increments survive.
+# The in-memory map is kept as a same-shell fast path / fallback.
 declare -gA _SUMMARY_COUNTS=()
+
+# Path to the append-only tally file backing the counters across subshells.
+# Set by summary::start; appended to by summary::add; read by summary::count,
+# summary::has_errors, and summary::emit. Empty when start has not run (the
+# lazy-init paths set it).
+declare -g _SUMMARY_TALLY_FILE=""
 
 # Ordered list of warning/skipped/error messages, in insertion order. Rendered
 # under `----- warnings -----` by summary::emit.
@@ -143,6 +162,71 @@ summary::start() {
     _SUMMARY_INFOS=()
     _SUMMARY_TITLE="${1:-}"
     _SUMMARY_INITIALISED="true"
+
+    # Create (or reset) the append-only tally file that makes counters durable
+    # across `$(…)` subshells (issue #36). One event type is appended per line
+    # by summary::add; the aggregators count occurrences. We create it here so
+    # the path is shared with any subshell forked AFTER start — a subshell
+    # inherits the exported variable and appends to the same inode, so its
+    # increments reach the parent's summary::emit. Truncate on every start so
+    # repeated start/emit cycles in one process don't accumulate stale events.
+    if [[ -z "$_SUMMARY_TALLY_FILE" ]] || [[ ! -e "$_SUMMARY_TALLY_FILE" ]]; then
+        _SUMMARY_TALLY_FILE="$(mktemp "${TMPDIR:-/tmp}/speckit-linear-summary.XXXXXX")"
+    else
+        : > "$_SUMMARY_TALLY_FILE"
+    fi
+    export _SUMMARY_TALLY_FILE
+}
+
+# -----------------------------------------------------------------------------
+# summary::_tally <type>
+#   Internal: append one event <type> to the durable tally file so the count
+#   survives the `$(…)` subshell it may have been recorded in (issue #36).
+#   Best-effort: a failed append (e.g. tally file missing on a lazy-init edge)
+#   must never abort the reconcile, so it falls back silently to the in-memory
+#   counter that summary::add already bumped.
+# -----------------------------------------------------------------------------
+summary::_tally() {
+    local type="$1"
+    # SCOPE (issue #36): only the `created` counter is made subshell-durable.
+    # That is the single counter the bug report identifies as under-reporting,
+    # and it is the only one the reconciler bumps exclusively from inside
+    # `$(…)` command substitutions (every issue/sub-issue create). Other
+    # counters (updated/archived/warned/skipped/error/info) keep their existing
+    # in-memory semantics verbatim — widening the durable set would also revive
+    # error/exit-code promotions that other call paths intentionally scope to
+    # their subshell, which is out of scope for this fix.
+    [[ "$type" == "created" ]] || return 0
+    [[ -n "$_SUMMARY_TALLY_FILE" ]] || return 0
+    printf '%s\n' "$type" >> "$_SUMMARY_TALLY_FILE" 2>/dev/null || true
+}
+
+# -----------------------------------------------------------------------------
+# summary::_count_from_tally <type>
+#   Internal: echo the durable count for <type> by tallying the on-disk file,
+#   falling back to the in-memory counter when no tally file is present (e.g.
+#   a caller that bumped the array directly, or a lazy-init edge). The on-disk
+#   value is authoritative when it exists because it folds in increments made
+#   inside subshells that the in-memory array never saw.
+# -----------------------------------------------------------------------------
+summary::_count_from_tally() {
+    local type="$1"
+    # Only `created` is tally-backed (see summary::_tally scope note). For the
+    # durable counter, the on-disk file is authoritative because it folds in
+    # the subshell increments the in-memory array never saw. All other types
+    # read straight from the in-memory map, exactly as before this fix.
+    if [[ "$type" == "created" \
+        && -n "$_SUMMARY_TALLY_FILE" && -r "$_SUMMARY_TALLY_FILE" ]]; then
+        # `grep -c` always prints a single count (0 on no match) and exits 1
+        # when the count is zero — so we must NOT add a `|| printf 0` fallback,
+        # or a no-match would print "0" from grep AND "0" from the fallback.
+        # The `|| true` only neutralises the exit status under `set -e`.
+        local n
+        n="$(grep -c -x -F -- "$type" "$_SUMMARY_TALLY_FILE" 2>/dev/null)" || true
+        printf '%s' "${n:-0}"
+        return 0
+    fi
+    printf '%s' "${_SUMMARY_COUNTS[$type]:-0}"
 }
 
 # -----------------------------------------------------------------------------
@@ -167,6 +251,9 @@ summary::add() {
     case "$type" in
         created|updated|archived|warned|skipped|error|info)
             _SUMMARY_COUNTS[$type]=$(( ${_SUMMARY_COUNTS[$type]:-0} + 1 ))
+            # Durable tally (issue #36): record the event so increments made
+            # inside a `$(…)` subshell still reach the parent's summary::emit.
+            summary::_tally "$type"
             ;;
         *)
             # Unknown type — treat as a warning event so it is loud rather
@@ -196,7 +283,7 @@ summary::add() {
 # -----------------------------------------------------------------------------
 summary::count() {
     local type="${1:-}"
-    printf '%s\n' "${_SUMMARY_COUNTS[$type]:-0}"
+    printf '%s\n' "$(summary::_count_from_tally "$type")"
 }
 
 # -----------------------------------------------------------------------------
@@ -206,7 +293,8 @@ summary::count() {
 #       if summary::has_errors; then exit 1; fi
 # -----------------------------------------------------------------------------
 summary::has_errors() {
-    local count="${_SUMMARY_COUNTS[error]:-0}"
+    local count
+    count="$(summary::_count_from_tally error)"
     if (( count > 0 )); then
         return 0
     fi
@@ -240,12 +328,16 @@ summary::emit() {
         summary::start ""
     fi
 
-    local created="${_SUMMARY_COUNTS[created]:-0}"
-    local updated="${_SUMMARY_COUNTS[updated]:-0}"
-    local archived="${_SUMMARY_COUNTS[archived]:-0}"
-    local skipped="${_SUMMARY_COUNTS[skipped]:-0}"
-    local warned="${_SUMMARY_COUNTS[warned]:-0}"
-    local errors="${_SUMMARY_COUNTS[error]:-0}"
+    # Read counts from the durable tally (issue #36) so increments recorded
+    # inside `$(…)` subshells — e.g. every issue/sub-issue create — are folded
+    # into the emitted block, not silently dropped with the subshell.
+    local created updated archived skipped warned errors
+    created="$(summary::_count_from_tally created)"
+    updated="$(summary::_count_from_tally updated)"
+    archived="$(summary::_count_from_tally archived)"
+    skipped="$(summary::_count_from_tally skipped)"
+    warned="$(summary::_count_from_tally warned)"
+    errors="$(summary::_count_from_tally error)"
 
     # Colour palette (Principle VIII counter coding):
     #   green  (32) — created / updated  — positive progress

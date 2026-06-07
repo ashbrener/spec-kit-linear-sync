@@ -217,6 +217,36 @@ emit_with_tty_stderr() {
     [ "$output" = "1" ]
 }
 
+@test "created increments inside a \$(…) subshell survive into emit (issue #36)" {
+    # Regression for #36: the reconciler records `summary::add created` while
+    # running inside command substitutions (reconcile::sync_spec_issue and
+    # reconcile::sync_task_phase_subissues are themselves `$(…)`-captured, and
+    # each calls reconcile::mutate_issue_create in a further `$(…)`). A bash
+    # associative array is COPIED into a `$(…)` subshell and never copied back,
+    # so those increments used to die with the subshell and the summary
+    # reported `Created: 0` even after creating issues. This test reproduces
+    # the exact shape: bump `created` ONLY inside command substitutions, then
+    # assert both summary::count and summary::emit see them.
+    #
+    # On the pre-fix code this FAILS (count is 0); on the fixed code the
+    # on-disk tally folds the subshell increments back in.
+    run bash -c "source '$SUMMARY_SH'
+                 summary::start 'subshell regression'
+                 # The captured value is irrelevant — we only care that the
+                 # side-effecting summary::add ran in the subshell, mirroring
+                 # mutate_issue_create echoing the new issue ID on stdout.
+                 _spec=\$(summary::add created 'spec issue'; printf 'ISSUE-1')
+                 for _p in 1 2 3; do
+                     _sub=\$(summary::add created \"phase \$_p sub-issue\"; printf 'SUB-%s' \"\$_p\")
+                 done
+                 printf 'COUNT=%s\n' \"\$(summary::count created)\"
+                 summary::emit 2>&1 1>/dev/null"
+    [ "$status" -eq 0 ]
+    # 1 spec issue + 3 sub-issues, all recorded from inside subshells.
+    [[ "$output" == *"COUNT=4"* ]]
+    [[ "$output" == *"Created:"*"4"* ]]
+}
+
 @test "summary::emit on a clean run omits the warnings section entirely" {
     # FR-023 sample shows the warnings block only when there are warnings.
     # A zero-warning reconcile should not print the `----- warnings -----`
