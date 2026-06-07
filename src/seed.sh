@@ -921,7 +921,15 @@ seed::write_config_uuids() {
 
     # IFS= + read -r + the `|| [[ -n "$line" ]]` tail preserves the final
     # line even when the file lacks a trailing newline.
+    #
+    # The inner `while :` loop is a re-dispatch mechanism: most branches `break`
+    # it to advance to the next input line, but the skip-exit branch `continue`s
+    # it to RE-PROCESS the current line (without reading a new one) so that a
+    # managed-block opener sitting immediately after another managed block's
+    # children can still be claimed by the opener-detection branches. See the
+    # skip-exit branch below for why (#33, #39, #40).
     while IFS= read -r line || [[ -n "$line" ]]; do
+      while :; do
         # End-of-`linear:` block — first top-level (no-leading-whitespace)
         # key after we entered it. Flush any missing replacement blocks
         # before the new top-level key.
@@ -941,7 +949,7 @@ seed::write_config_uuids() {
             in_linear=0
             state="normal"
             printf '%s\n' "$line" >>"$tmp_out"
-            continue
+            break
         fi
 
         # Top-level `linear:` opener — record + emit.
@@ -949,7 +957,7 @@ seed::write_config_uuids() {
             in_linear=1
             state="normal"
             printf '%s\n' "$line" >>"$tmp_out"
-            continue
+            break
         fi
 
         # workflow_state_uuids opener — emit replacement on first encounter,
@@ -963,7 +971,7 @@ seed::write_config_uuids() {
                 wf_seen=1
             fi
             state="skip_wf"
-            continue
+            break
         fi
 
         # default_state_uuids opener — same once-only emission semantics.
@@ -974,7 +982,7 @@ seed::write_config_uuids() {
                 default_seen=1
             fi
             state="skip_default"
-            continue
+            break
         fi
 
         # agent_label_uuids opener (FR-036) — same once-only emission semantics.
@@ -985,26 +993,42 @@ seed::write_config_uuids() {
                 agent_seen=1
             fi
             state="skip_agent"
-            continue
+            break
         fi
 
         # While skipping an old replacement block, drop deeply-indented
         # children (4+ spaces) and comments. Any line at 2-or-fewer spaces
-        # of indent is a sibling key — exit skip mode and re-process this
-        # line as normal by re-emitting through the default branch.
+        # of indent is a sibling key — exit skip mode. We then re-dispatch the
+        # line from the top of the loop so the opener-detection branches above
+        # get a chance to claim it. This matters because a managed-block opener
+        # can sit immediately after another managed block's last child (in the
+        # shipped template `default_state_uuids:` directly follows
+        # `workflow_state_uuids`'s children, separated only by comments). If we
+        # emitted such a sibling verbatim here, the stale (zeroed) opener would
+        # be copied AND the dedicated seen-flag flush would re-append the real
+        # block → a duplicate YAML key (#33, #39, #40). Re-dispatching lets the
+        # seen-flag logic own ALL emission of the three managed blocks exactly
+        # once, regardless of their position. The inner-loop `continue` below
+        # re-runs the dispatch body without consuming a new input line.
         if [[ "$state" == "skip_wf" ]] || [[ "$state" == "skip_default" ]] \
             || [[ "$state" == "skip_agent" ]]; then
             if [[ "$line" =~ ^\ \ \ \ [^[:space:]] ]] \
                 || [[ "$line" =~ ^[[:space:]]+# ]]; then
-                # Indented child / nested comment — drop it.
-                continue
+                # Indented child / nested comment — drop it; advance a line.
+                break
             fi
-            # Sibling or blank — leave skip mode and fall through to emit.
+            # Sibling or blank — leave skip mode and re-dispatch this line so
+            # the opener / end-of-linear branches above can claim it. `continue`
+            # re-runs the inner loop body for the SAME line (redispatch); no new
+            # input line is read.
             state="normal"
+            continue
         fi
 
-        # Default: emit verbatim.
+        # Default: emit verbatim, then advance to the next input line.
         printf '%s\n' "$line" >>"$tmp_out"
+        break
+      done
     done <"$SEED_CONFIG_PATH"
 
     # File ended mid-`linear:` block — flush any missing replacement blocks
