@@ -3224,6 +3224,18 @@ reconcile::process_spec() {
         summary::add warned "spec ${feature_number}: ${line_count} task line(s) outside any ## Phase header"
     fi
 
+    # Surface phase-like headings the strict colon parser rejects. These
+    # produce ZERO task-phase sub-issues with no other diagnostic, so make
+    # the silent miss loud (this does NOT broaden the accepted grammar —
+    # headers must still use `## Phase N:`).
+    local near_misses
+    if near_misses="$(parser::phase_header_near_misses "${spec_dir%/}/tasks.md" 2>/dev/null)" \
+        && [[ -n "$near_misses" ]]; then
+        local near_miss_count
+        near_miss_count="$(printf '%s\n' "$near_misses" | wc -l | awk '{print $1}')"
+        summary::add warned "spec ${feature_number}: ${near_miss_count} phase-like heading(s) not parsed — expected '## Phase N:'"
+    fi
+
     # --- 4c. Spec Issue find-or-create/update (FR-001..FR-004b) -------
     local spec_issue_id
     if ! spec_issue_id="$(reconcile::sync_spec_issue \

@@ -343,6 +343,36 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# parser::phase_header_near_misses
+# ---------------------------------------------------------------------------
+
+@test "phase_header_near_misses: 006 flags both em-dash phase headers" {
+    run parser::phase_header_near_misses "${FIXTURES}/006-emdash-phases/tasks.md"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 2 ]
+    [[ "${lines[0]}" == *"## Phase 1 — Setup"* ]]
+    [[ "${lines[1]}" == *"## Phase 2 — Foundational"* ]]
+}
+
+@test "phase_header_near_misses: 006 em-dash headers still parse to ZERO phases (grammar unchanged)" {
+    run parser::task_phases "${FIXTURES}/006-emdash-phases/tasks.md"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "phase_header_near_misses: 002 (canonical colon headers) flags nothing" {
+    run parser::phase_header_near_misses "${FIXTURES}/002-multi-phase/tasks.md"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "phase_header_near_misses: missing file yields no output, exit 0" {
+    run parser::phase_header_near_misses "/nonexistent/tasks.md"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+# ---------------------------------------------------------------------------
 # parser::clarify_sessions
 # ---------------------------------------------------------------------------
 

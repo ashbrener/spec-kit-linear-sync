@@ -368,6 +368,38 @@ parser::malformed_task_lines() {
 }
 
 # ---------------------------------------------------------------------------
+# parser::phase_header_near_misses <tasks_md_path>
+#
+# Emits one line per heading that LOOKS like a task-phase header
+# (`^## Phase <N>`) but is REJECTED by the strict colon parser used by
+# parser::task_phases / parser::tasks_in_phase (which require
+# `^## Phase <N>:`). Lines are emitted with their 1-indexed source line
+# number first, then a tab, then the verbatim line.
+#
+# These are the silent killers: a header like `## Phase 1 — Setup`
+# (em-dash), `## Phase 1 - Setup` (hyphen), or `## Phase 1 Setup`
+# (bare) matches the colon parser NOTHING, so zero task-phase
+# sub-issues are created with no other diagnostic. The caller turns a
+# non-empty result into a near-miss WARNING so the 0-sub-issue case is
+# loud rather than silent.
+#
+# NOTE: this is a DIAGNOSTIC only — it does NOT broaden the accepted
+# phase-header grammar (still colon-only per FR-005). Empty output when
+# every `## Phase <N>` heading already uses the canonical colon form.
+# ---------------------------------------------------------------------------
+parser::phase_header_near_misses() {
+    local tasks_md="$1"
+    [[ -f "$tasks_md" ]] || return 0
+    awk '
+        # A header that starts "## Phase <N>" but is NOT the strict
+        # "## Phase <N>:" form the parser actually consumes.
+        /^## Phase [0-9]+/ && !/^## Phase [0-9]+:/ {
+            printf "%d\t%s\n", NR, $0
+        }
+    ' "$tasks_md"
+}
+
+# ---------------------------------------------------------------------------
 # parser::clarify_sessions <spec_md_path>
 #
 # Emits one line per `### Session YYYY-MM-DD` subheading found under
