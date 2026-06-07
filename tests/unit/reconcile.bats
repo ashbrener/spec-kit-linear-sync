@@ -214,3 +214,71 @@ hint_for() {
     # but crucially NOT 'merged'.
     [ "${output}" != "merged" ]
 }
+
+# ---------------------------------------------------------------------------
+# #42 — composed spec Issue description must NOT carry the hardcoded
+# "## Diagrams" README-anchor block.
+#
+# The old block stamped four `${base_url}#how-sync-works` /
+# `#data-model` / `#phase-mapping` / `#write-authority-across-worktrees`
+# links into every spec Issue. Those anchors only exist in THIS bridge's
+# own README, so for any real consumer repo they were dead links. The
+# block is gone: compose_issue_description now emits overview → memory
+# only. This test pins that the anchors never reappear in the composed
+# body.
+#
+# Helper: source reconcile.sh in an isolated shell and run
+# reconcile::compose_issue_description with a representative overview +
+# memory block, echoing the composed description to stdout.
+# ---------------------------------------------------------------------------
+compose_desc() {
+    local overview="$1" memory="$2" extra="${3:-}" qo qm qe
+    printf -v qo '%q' "$overview"
+    printf -v qm '%q' "$memory"
+    printf -v qe '%q' "$extra"
+    bash -c "
+        source '${RECONCILE_SH}' 2>/dev/null
+        reconcile::log() { :; }
+        # Pass the legacy 3rd 'diagrams' argument too. The pre-fix
+        # compose_issue_description appended it verbatim; the fixed one
+        # ignores it. Either way the dead anchors must not survive.
+        reconcile::compose_issue_description ${qo} ${qm} ${qe}
+    "
+}
+
+@test "#42: composed description contains no hardcoded README anchor links" {
+    # Third arg mimics the old render_diagrams_block output so this test
+    # FAILS on pre-fix code (which appended it) and PASSES on the fix
+    # (which drops the parameter entirely).
+    local legacy_diagrams='## Diagrams
+
+- [How sync works](https://github.com/x/y#how-sync-works)
+- [Data model](https://github.com/x/y#data-model)
+- [Phase mapping](https://github.com/x/y#phase-mapping)
+- [Write authority](https://github.com/x/y#write-authority-across-worktrees)'
+    run compose_desc \
+        "## Overview"$'\n\n'"A short excerpt." \
+        "| **Field** | **Value** |" \
+        "$legacy_diagrams"
+    [ "${status}" -eq 0 ]
+    # None of the four dead README anchors may appear.
+    [[ "${output}" != *"#how-sync-works"* ]]
+    [[ "${output}" != *"#data-model"* ]]
+    [[ "${output}" != *"#phase-mapping"* ]]
+    [[ "${output}" != *"#write-authority-across-worktrees"* ]]
+    # And no "## Diagrams" heading.
+    [[ "${output}" != *"## Diagrams"* ]]
+    # Sanity: the overview + memory blocks ARE still present.
+    [[ "${output}" == *"## Overview"* ]]
+    [[ "${output}" == *"**Field**"* ]]
+}
+
+@test "#42: the render_diagrams_block helper no longer exists" {
+    run bash -c "
+        source '${RECONCILE_SH}' 2>/dev/null
+        declare -F reconcile::render_diagrams_block
+    "
+    # declare -F returns non-zero when the function is undefined.
+    [ "${status}" -ne 0 ]
+    [ -z "${output}" ]
+}
