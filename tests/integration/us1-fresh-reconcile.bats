@@ -144,4 +144,21 @@ setup() {
     # streams into `$output` so `[[ "$output" == *"Created:"* ]]` matches.
     [[ "$output" == *"speckit.linear summary"* ]]
     [[ "$output" == *"Created:"* ]]
+
+    # ---- created COUNT contract (FR-023 / issue #36) -------------------
+    # Regression guard for #36: the Created counter must reflect the issues
+    # actually created (1 spec Issue + 3 task-phase sub-issues = at least 4),
+    # not just 0. Before the fix, `summary::add created` ran inside the
+    # `$(…)` command substitutions wrapping sync_spec_issue / mutate_issue_create,
+    # so its associative-array increments died in the subshell and the
+    # summary reported `Created: 0`. We parse the digit that follows the
+    # `Created:` label (tolerating ANSI colour codes around the label) and
+    # assert it is >= 4.
+    local created_count
+    created_count="$(printf '%s\n' "$output" \
+        | grep -o 'Created:[^0-9]*[0-9][0-9]*' \
+        | grep -o '[0-9][0-9]*$' \
+        | head -n1)"
+    [ -n "$created_count" ]
+    [ "$created_count" -ge 4 ]
 }
