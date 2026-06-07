@@ -832,7 +832,7 @@ main() {
 
     # Config load + validate. Halts (exit 2) on missing / malformed
     # config per FR-022.
-    if ! config::load "$STATUS_CONFIG_PATH" 2>/dev/null; then
+    if ! config::load "$STATUS_CONFIG_PATH"; then
         printf 'spec-kit-linear: status: cannot load config at %s\n' "$STATUS_CONFIG_PATH" >&2
         printf 'hint: copy config-template.yml to %s and run /spec-kit-linear-install\n' \
             "$STATUS_CONFIG_PATH" >&2
@@ -840,7 +840,7 @@ main() {
         summary::emit
         exit 2
     fi
-    if ! config::validate 2>/dev/null; then
+    if ! config::validate; then
         # validate() exits 2 itself; re-running here would double-fire.
         # Instead surface a warning and re-invoke without trapping.
         printf 'spec-kit-linear: status: config validation failed at %s\n' "$STATUS_CONFIG_PATH" >&2

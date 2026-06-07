@@ -778,7 +778,7 @@ main() {
     # config per FR-022. --workspace-wide still requires a config —
     # team_id is the lookup key — but does NOT require project.id to
     # be set to a real Project (the workspace scope sidesteps it).
-    if ! config::load "$PULL_CONFIG_PATH" 2>/dev/null; then
+    if ! config::load "$PULL_CONFIG_PATH"; then
         printf 'spec-kit-linear: pull: cannot load config at %s\n' "$PULL_CONFIG_PATH" >&2
         printf 'hint: copy config-template.yml to %s and run /spec-kit-linear-install\n' \
             "$PULL_CONFIG_PATH" >&2
@@ -786,7 +786,7 @@ main() {
         summary::emit
         exit 2
     fi
-    if ! config::validate 2>/dev/null; then
+    if ! config::validate; then
         printf 'spec-kit-linear: pull: config validation failed at %s\n' "$PULL_CONFIG_PATH" >&2
         summary::add error "config validation failed"
         summary::emit
