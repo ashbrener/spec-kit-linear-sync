@@ -277,7 +277,7 @@ generate_repo() {
     local n="$2"
     local i nnn spec_dir src dst
 
-    mkdir -p "$root/specs" "$root/.specify/extensions/linear"
+    mkdir -p "$root/specs" "$root/.specify/extensions/linear-sync"
 
     # Hermetic git init.
     GIT_AUTHOR_NAME='Perf Harness' \
@@ -316,7 +316,7 @@ generate_repo() {
         done
     done
 
-    write_config_yaml "${root}/.specify/extensions/linear/linear-config.yml"
+    write_config_yaml "${root}/.specify/extensions/linear-sync/linear-config.yml"
 
     # .env with a fake Linear key so graphql.sh's bootstrap doesn't bail.
     printf 'LINEAR_API_KEY=lin_api_perf_fake\n' > "${root}/.env"
@@ -346,7 +346,7 @@ time_reconcile() {
     (
         cd "$sandbox"
         export PATH="${mock_bin}:${PATH}"
-        export SPECKIT_LINEAR_CONFIG="${sandbox}/.specify/extensions/linear/linear-config.yml"
+        export SPECKIT_LINEAR_CONFIG="${sandbox}/.specify/extensions/linear-sync/linear-config.yml"
         bash "$RECONCILE_SH" --all --dry-run --quiet >/dev/null 2>&1 || true
     )
     end="${EPOCHREALTIME}"

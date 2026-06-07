@@ -109,7 +109,7 @@ _require_integration_env() {
 
     # linear-config.yml MUST land at the expected path and MUST mirror
     # the passed UUIDs (bit-for-bit identical write per FR-044).
-    local cfg="${TEST_TMP}/.specify/extensions/linear/linear-config.yml"
+    local cfg="${TEST_TMP}/.specify/extensions/linear-sync/linear-config.yml"
     [ -f "$cfg" ]
     grep -q "${LINEAR_TEST_TEAM_UUID}" "$cfg"
     grep -q "${LINEAR_TEST_PROJECT_UUID}" "$cfg"
@@ -140,7 +140,7 @@ _require_integration_env() {
     "
     [ "$status" -eq 0 ]
 
-    local cfg="${TEST_TMP}/.specify/extensions/linear/linear-config.yml"
+    local cfg="${TEST_TMP}/.specify/extensions/linear-sync/linear-config.yml"
     [ -f "$cfg" ]
     grep -q "${LINEAR_TEST_TEAM_UUID}" "$cfg"
     grep -q "${LINEAR_TEST_PROJECT_UUID}" "$cfg"
@@ -176,7 +176,7 @@ _require_integration_env() {
     # interactive mode (no --non-interactive).
     [[ "$output" == *"--auto-create is deprecated"* ]]
 
-    local cfg="${TEST_TMP}/.specify/extensions/linear/linear-config.yml"
+    local cfg="${TEST_TMP}/.specify/extensions/linear-sync/linear-config.yml"
     [ -f "$cfg" ]
     grep -q "${LINEAR_TEST_TEAM_UUID}" "$cfg"
     # Auto-created project named after the sandbox basename (TEST_TMP's
@@ -201,7 +201,7 @@ _require_integration_env() {
     # --non-interactive (the flag is load-bearing for CI).
     [[ ! "$output" == *"--auto-create is deprecated"* ]]
 
-    local cfg="${TEST_TMP}/.specify/extensions/linear/linear-config.yml"
+    local cfg="${TEST_TMP}/.specify/extensions/linear-sync/linear-config.yml"
     [ -f "$cfg" ]
     grep -q "${LINEAR_TEST_TEAM_UUID}" "$cfg"
 }
@@ -251,7 +251,7 @@ _require_integration_env() {
 
 @test "T244: row 8 — --non-interactive halt fires before any filesystem write" {
     # Confirm the FR-045 halt is parse-time, not run-time: no
-    # `.specify/extensions/linear/` tree gets created on the halt
+    # `.specify/extensions/linear-sync/` tree gets created on the halt
     # path. Matches data-model.md §4 "quit before S6" invariant.
 
     run bash -c "
@@ -261,5 +261,5 @@ _require_integration_env() {
             --no-action </dev/null
     "
     [ "$status" -eq 2 ]
-    [ ! -f "${TEST_TMP}/.specify/extensions/linear/linear-config.yml" ]
+    [ ! -f "${TEST_TMP}/.specify/extensions/linear-sync/linear-config.yml" ]
 }

@@ -52,13 +52,13 @@ teardown() {
 #        the bridge's own checkout (target == source), asserts exit 2
 #        with the verbatim FR-046 message from install-flags.md §4 and
 #        zero filesystem mutations under
-#        `.specify/extensions/linear/`. Runs at every push — no
+#        `.specify/extensions/linear-sync/`. Runs at every push — no
 #        live-network access — so it does NOT require
 #        RUN_INTEGRATION_TESTS=1.
 #
 # T254 — FR-049 vendored `.git/` warning end-to-end. Runs `--dev`
 #        install from a SEPARATE consumer sandbox where the source has
-#        a vendored `.git/` under `.specify/extensions/linear/`;
+#        a vendored `.git/` under `.specify/extensions/linear-sync/`;
 #        asserts the FR-049 warning surfaces in the dependency report
 #        and the summary's "next steps" block. Likewise runs at every
 #        push (fixture-driven; no live Linear calls).
@@ -82,7 +82,7 @@ teardown() {
     local archive_url="https://github.com/ashbrener/spec-kit-linear/archive/refs/heads/main.zip"
 
     pushd "$sandbox" >/dev/null
-    run specify extension add linear --from "$archive_url"
+    run specify extension add linear-sync --from "$archive_url"
     popd >/dev/null
 
     [ "$status" -eq 0 ]
@@ -100,7 +100,7 @@ teardown() {
 
     # Snapshot the target's install-managed directory state BEFORE the
     # halt fires so we can prove zero writes happened.
-    local config_dir="${sandbox}/.specify/extensions/linear"
+    local config_dir="${sandbox}/.specify/extensions/linear-sync"
     local config_path="${config_dir}/linear-config.yml"
     local extensions_yml="${sandbox}/.specify/extensions.yml"
 
@@ -146,7 +146,7 @@ teardown() {
 
 @test "T254: FR-049 vendored .git/ warning surfaces in dependency report when source carries .git/" {
     # Run `--dev` install from a sandbox SOURCE that carries a
-    # vendored `.git/` under `.specify/extensions/linear/` (the
+    # vendored `.git/` under `.specify/extensions/linear-sync/` (the
     # CLI-vendoring footgun FR-049 catches) into a DIFFERENT
     # consumer-sandbox target. The dependency report MUST surface the
     # FR-049 warning row; the install summary's next-steps block MUST
@@ -155,8 +155,8 @@ teardown() {
     cp -R "${PROJECT_ROOT}" "$source_sandbox"
     # Vendor a `.git/` under the bridge's own checkout — simulates the
     # spec-kit-CLI `--dev` vendoring path.
-    mkdir -p "${source_sandbox}/.specify/extensions/linear/.git"
-    touch "${source_sandbox}/.specify/extensions/linear/.git/HEAD"
+    mkdir -p "${source_sandbox}/.specify/extensions/linear-sync/.git"
+    touch "${source_sandbox}/.specify/extensions/linear-sync/.git/HEAD"
 
     # Distinct consumer-sandbox target so the FR-046 guard does NOT
     # short-circuit before we reach the dependency report.
@@ -184,6 +184,6 @@ teardown() {
     # The dependency-report row must surface the vendored-`.git/`
     # warning with FR-049 + the rm -rf remediation path.
     [[ "$output" == *"FR-049"* ]]
-    [[ "$output" == *".specify/extensions/linear/.git"* ]]
+    [[ "$output" == *".specify/extensions/linear-sync/.git"* ]]
     [[ "$output" == *"rm -rf"* ]]
 }

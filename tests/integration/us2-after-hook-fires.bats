@@ -11,7 +11,7 @@
 #   WHEN  a spec-kit `/speckit-clarify` invocation is simulated by
 #         dispatching the after_clarify hook chain registered in
 #         `.specify/extensions.yml`,
-#   THEN  `speckit.linear.push` (→ `src/reconcile.sh`) fires exactly
+#   THEN  `speckit.linear-sync.push` (→ `src/reconcile.sh`) fires exactly
 #         once for the current spec, hitting the mocked Linear curl
 #         shim with at least one mutation body containing the spec's
 #         identity label (`speckit-spec:002`). Exit 0.
@@ -27,7 +27,7 @@
 # entry, and shell out to its `command:` value. We simulate the
 # dispatcher by reading the YAML and invoking reconcile.sh ourselves —
 # the test's point is to prove that the hook is registered and points
-# at speckit.linear.push, not to dogfood the dispatcher.
+# at speckit.linear-sync.push, not to dogfood the dispatcher.
 # =============================================================================
 
 load '../helpers/integration-helpers'
@@ -75,7 +75,7 @@ setup() {
     integration::stage_response 'default' '{"data":{}}'
 }
 
-@test "T035: after_clarify hook fires speckit.linear.push exactly once" {
+@test "T035: after_clarify hook fires speckit.linear-sync.push exactly once" {
     # The bridge's install step MUST have written six after_* entries
     # to `.specify/extensions.yml` per FR-031. Confirm the registration
     # first — without this the rest of the test is meaningless.
@@ -85,7 +85,7 @@ setup() {
     grep -qE 'speckit\.linear\.push' "$extensions_yml"
 
     # ---- simulate the dispatcher ----
-    # spec-kit's host agent translates `speckit.linear.push` into
+    # spec-kit's host agent translates `speckit.linear-sync.push` into
     # `bash src/reconcile.sh`. The hook chain is "for each entry under
     # after_clarify whose enabled is not false, shell to its command".
     # We directly invoke the reconciler scoped to spec 002 (matches
@@ -113,7 +113,7 @@ setup() {
     [ "$spec_label_calls" -ge 1 ]
 
     # ---- the hook fired EXACTLY ONCE ----
-    # T035's contract: "invokes speckit.linear.push (mocked) once". We
+    # T035's contract: "invokes speckit.linear-sync.push (mocked) once". We
     # simulate the dispatcher exactly once above; if the reconciler
     # internally re-invoked itself (recursive hook explosion), the
     # spec-Issue CREATE mutation would land more than once. Count

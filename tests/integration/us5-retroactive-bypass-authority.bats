@@ -101,10 +101,10 @@ us5_bypass::setup_three_spec_unrelated_branch() {
     SANDBOX_REPO="${BATS_TEST_TMPDIR}/repo"
     MOCK_BIN="${BATS_TEST_TMPDIR}/bin"
     MOCK_LINEAR_STATE="${BATS_TEST_TMPDIR}/mock-linear-state"
-    LINEAR_CONFIG_PATH="${SANDBOX_REPO}/.specify/extensions/linear/linear-config.yml"
+    LINEAR_CONFIG_PATH="${SANDBOX_REPO}/.specify/extensions/linear-sync/linear-config.yml"
 
     mkdir -p "$SANDBOX_REPO" "$MOCK_BIN" "$MOCK_LINEAR_STATE"
-    mkdir -p "${SANDBOX_REPO}/.specify/extensions/linear"
+    mkdir -p "${SANDBOX_REPO}/.specify/extensions/linear-sync"
     mkdir -p "${SANDBOX_REPO}/specs"
 
     export SANDBOX_REPO MOCK_BIN MOCK_LINEAR_STATE LINEAR_CONFIG_PATH

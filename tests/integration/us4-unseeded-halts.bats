@@ -17,13 +17,13 @@
 #           * exits with code 2 (workspace-level config error per
 #             contracts/command-shapes.md §1.6)
 #           * emits a structured error message naming the missing
-#             resource and pointing at `speckit.linear.seed`
+#             resource and pointing at `speckit.linear-sync.seed`
 #           * issues ZERO writes to Linear (FR-022: "rather than
 #             partially succeeding")
 #
 # Maps to FR-022 + FR-024 + contracts/command-shapes.md §1.7 ("`linear
 # .workflow_state_uuids.*` unfilled (all zeroes) → Exit 2 with 'Run
-# `/spec-kit-linear-seed` first'").
+# `/spec-kit-linear-sync-seed` first'").
 #
 # Mock strategy: reuses the curl-shim. We deliberately stage no
 # canned responses for the seed-time queries — the reconcile path
@@ -118,14 +118,14 @@ YAML
     mutations="$(integration::mutation_count)"
     [ "$mutations" -eq 0 ]
 
-    # ---- error message names `speckit.linear.seed` ----
-    # contracts/command-shapes.md §1.7: "Run `/spec-kit-linear-seed`
+    # ---- error message names `speckit.linear-sync.seed` ----
+    # contracts/command-shapes.md §1.7: "Run `/spec-kit-linear-sync-seed`
     # first" — we accept the three-dot form, the slash form, or the
     # bare `seed` token because the exact phrasing isn't load-bearing
     # so long as the pointer is unambiguous.
-    [[ "$output" == *"speckit.linear.seed"* ]] || \
-        [[ "$output" == *"/spec-kit-linear-seed"* ]] || \
-        [[ "$output" == *"spec-kit-linear-seed"* ]] || \
+    [[ "$output" == *"speckit.linear-sync.seed"* ]] || \
+        [[ "$output" == *"/spec-kit-linear-sync-seed"* ]] || \
+        [[ "$output" == *"spec-kit-linear-sync-seed"* ]] || \
         [[ "$output" == *"linear seed"* ]] || \
         [[ "$output" == *"run seed"* ]] || \
         [[ "$output" == *"Run seed"* ]]

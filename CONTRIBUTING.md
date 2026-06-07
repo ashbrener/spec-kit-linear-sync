@@ -41,7 +41,7 @@ Drive the full spec-kit lifecycle. Each command creates or extends artifacts und
 
 ## Hooks that fire (and you'll see)
 
-Per [`.specify/extensions.yml`](./.specify/extensions.yml), the following hooks are wired into this repo today. Once the bridge it produces is installed locally, `speckit.linear.push` will join the `after_*` set (per FR-031). Both `before_*` and `after_*` git hooks are visible — expect to see commit prompts.
+Per [`.specify/extensions.yml`](./.specify/extensions.yml), the following hooks are wired into this repo today. Once the bridge it produces is installed locally, `speckit.linear-sync.push` will join the `after_*` set (per FR-031). Both `before_*` and `after_*` git hooks are visible — expect to see commit prompts.
 
 | Hook event | Extension fired | Optional? |
 |---|---|---|
@@ -49,7 +49,7 @@ Per [`.specify/extensions.yml`](./.specify/extensions.yml), the following hooks 
 | `before_specify` | `speckit.git.feature` (creates branch) | required |
 | `before_clarify` / `before_plan` / `before_tasks` / `before_implement` / `before_checklist` / `before_analyze` / `before_taskstoissues` | `speckit.git.commit` | optional |
 | `after_constitution` / `after_specify` / `after_clarify` / `after_plan` / `after_tasks` / `after_implement` / `after_checklist` / `after_analyze` / `after_taskstoissues` | `speckit.git.commit` | optional |
-| `after_specify` / `after_clarify` / `after_plan` / `after_tasks` / `after_implement` / `after_analyze` *(once the bridge is dogfooded — spec 002 onwards per the bootstrapping note in `README.md`)* | `speckit.linear.push` | required (`optional: false` per FR-031) |
+| `after_specify` / `after_clarify` / `after_plan` / `after_tasks` / `after_implement` / `after_analyze` *(once the bridge is dogfooded — spec 002 onwards per the bootstrapping note in `README.md`)* | `speckit.linear-sync.push` | required (`optional: false` per FR-031) |
 
 `auto_execute_hooks: true` is set, so hooks run without per-invocation prompts.
 
@@ -94,7 +94,7 @@ No AI co-author trailers. No "Generated with …" footers in commit messages.
 - If the issue concerns a specific feature, prefix the title with `[spec-NNN]`.
 - If it concerns the constitution, name the principle (`[Principle IV] …`).
 - Include: clear repro steps, expected vs actual, the FR or principle in tension, and the spec-kit / bash / gh versions you're on.
-- For bridge runtime issues against a real Linear workspace, include the `speckit.linear.status` output (once that command exists — TBD as spec-kit conventions stabilise).
+- For bridge runtime issues against a real Linear workspace, include the `speckit.linear-sync.status` output (once that command exists — TBD as spec-kit conventions stabilise).
 
 ## Maintainer review checklist
 

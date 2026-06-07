@@ -74,10 +74,10 @@ drift_e2e::setup_specs_on_main() {
     SANDBOX_REPO="${BATS_TEST_TMPDIR}/repo"
     MOCK_BIN="${BATS_TEST_TMPDIR}/bin"
     MOCK_LINEAR_STATE="${BATS_TEST_TMPDIR}/mock-linear-state"
-    LINEAR_CONFIG_PATH="${SANDBOX_REPO}/.specify/extensions/linear/linear-config.yml"
+    LINEAR_CONFIG_PATH="${SANDBOX_REPO}/.specify/extensions/linear-sync/linear-config.yml"
 
     mkdir -p "$SANDBOX_REPO" "$MOCK_BIN" "$MOCK_LINEAR_STATE"
-    mkdir -p "${SANDBOX_REPO}/.specify/extensions/linear" "${SANDBOX_REPO}/specs"
+    mkdir -p "${SANDBOX_REPO}/.specify/extensions/linear-sync" "${SANDBOX_REPO}/specs"
     export SANDBOX_REPO MOCK_BIN MOCK_LINEAR_STATE LINEAR_CONFIG_PATH
 
     printf '0' > "${MOCK_LINEAR_STATE}/call_count"

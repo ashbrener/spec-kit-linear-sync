@@ -212,7 +212,7 @@ _graphql_call_count() {
     _source_install_sh
     summary::start "test"
     local source_dir="${BATS_TEST_TMPDIR}/dirty-source"
-    mkdir -p "${source_dir}/.specify/extensions/linear/.git"
+    mkdir -p "${source_dir}/.specify/extensions/linear-sync/.git"
     run install::detect_vendored_git "$source_dir"
     [ "$status" -eq 0 ]
     # The warning is emitted via summary::add + install::_log_warn; the
@@ -845,7 +845,7 @@ _graphql_call_count() {
 
 @test "US1-scenario-1: fresh repo (no .env, no config) — discovery completes" {
     [ ! -f "${TEST_TMP}/.env" ]
-    [ ! -f "${TEST_TMP}/.specify/extensions/linear/linear-config.yml" ]
+    [ ! -f "${TEST_TMP}/.specify/extensions/linear-sync/linear-config.yml" ]
     run bash -c "
         cd '${TEST_TMP}'
         unset LINEAR_API_KEY
@@ -964,7 +964,7 @@ _graphql_call_count() {
     _source_install_sh
     summary::start "phase-5 test"
     local source_dir="${BATS_TEST_TMPDIR}/source-clean"
-    mkdir -p "${source_dir}/.specify/extensions/linear"
+    mkdir -p "${source_dir}/.specify/extensions/linear-sync"
     run install::detect_vendored_git "$source_dir"
     [ "$status" -eq 0 ]
     # No FR-049 warning row should have surfaced on stderr/stdout.
@@ -977,12 +977,12 @@ _graphql_call_count() {
     _source_install_sh
     summary::start "phase-5 test"
     local source_dir="${BATS_TEST_TMPDIR}/source-vendored"
-    mkdir -p "${source_dir}/.specify/extensions/linear/.git"
+    mkdir -p "${source_dir}/.specify/extensions/linear-sync/.git"
     run install::detect_vendored_git "$source_dir"
     [ "$status" -eq 0 ]
     [[ "$output" == *"FR-049"* ]]
     [[ "$output" == *"rm -rf"* ]]
-    [[ "$output" == *".specify/extensions/linear/.git"* ]]
+    [[ "$output" == *".specify/extensions/linear-sync/.git"* ]]
 
     # Direct (non-`run`) re-call so the side-effect counter survives
     # into the test scope — `run` forks a subshell and the summary
@@ -1016,7 +1016,7 @@ _make_worktree_consumer() {
     git -C "$base" config user.name "Test"
     git -C "$base" commit -q --allow-empty -m "root"
     git -C "$base" worktree add -q -b feat/wt "$wt" >/dev/null 2>&1
-    mkdir -p "${wt}/.specify/extensions/linear"
+    mkdir -p "${wt}/.specify/extensions/linear-sync"
     printf '%s\n' "$wt"
 }
 
@@ -1083,7 +1083,7 @@ _make_worktree_consumer() {
     git -C "$base" config user.email "test@example.com"
     git -C "$base" config user.name "Test"
     git -C "$base" config core.hooksPath ".husky"
-    mkdir -p "${base}/.specify/extensions/linear"
+    mkdir -p "${base}/.specify/extensions/linear-sync"
     cd "$base"
 
     install::check_repo_layout >/dev/null 2>&1 || true

@@ -5,7 +5,7 @@
 # This file is the installation contract read by `specify extension add linear`
 # (see ~/.local/share/uv/tools/specify-cli/.../specify_cli/extensions.py).
 # The CLI validates this manifest, copies the entire repo into the consumer's
-# `.specify/extensions/linear/`, registers the hooks below into the consumer's
+# `.specify/extensions/linear-sync/`, registers the hooks below into the consumer's
 # `.specify/extensions.yml`, and (if the consumer initialised with
 # `--ai-skills`) auto-generates one SKILL.md per command under
 # `.claude/skills/spec-kit-linear-<sub>/`.
@@ -37,7 +37,7 @@ extension:
   # Lowercase-kebab id used throughout the framework. MUST match
   # ^[a-z0-9-]+$ and is the directory name under `.specify/extensions/`.
   # Command names below are required to start with `speckit.<id>.`.
-  id: "linear"
+  id: "linear-sync"
 
   # Human-readable name surfaced in `specify extension list` and the
   # community catalog. Keeping the `speckit-` prefix here makes the
@@ -47,7 +47,7 @@ extension:
   # PEP 440 version. We are pre-release while the v1 implementation is
   # being built out under specs/001-spec-kit-linear-bridge/. Bumped to a
   # stable 0.1.0 when the bridge actually ships an end-to-end reconcile.
-  version: "0.2.2"
+  version: "0.3.0"
 
   # One-line description — matches the GitHub repo description so the
   # catalog entry and the README cover read the same way.
@@ -63,7 +63,7 @@ extension:
 # `requires:` — runtime preconditions the CLI validates at install.
 # Only `speckit_version` is first-class; the Linear MCP endpoint and OAuth
 # scope checks are not declarable here and so are enforced at install-time
-# inside the `speckit.linear.install` command per FR-018b.
+# inside the `speckit.linear-sync.install` command per FR-018b.
 # ---------------------------------------------------------------------------
 requires:
   # Conventional floor used by sibling community extensions. Bumping this
@@ -103,7 +103,7 @@ provides:
     # pushes whatever Linear needs to converge. This is also the command
     # every `after_*` hook below points at, so any lifecycle transition
     # triggers a full reconcile.
-    - name: "speckit.linear.push"
+    - name: "speckit.linear-sync.push"
       file: "commands/linear-push.md"
       description: "Reconcile filesystem state → Linear for every spec in the consumer repo. Idempotent; safe to re-run; the only path that mutates Linear."
 
@@ -111,7 +111,7 @@ provides:
     # current spec (or all specs in the repo). Used from non-authoritative
     # worktrees (FR-025) where push is forbidden but the operator still
     # needs to answer "what is Linear showing for this spec right now?".
-    - name: "speckit.linear.pull"
+    - name: "speckit.linear-sync.pull"
       file: "commands/linear-pull.md"
       description: "Show Linear's current state for the current spec (or every spec in this repo). Read-only; never mutates filesystem or Linear."
 
@@ -119,7 +119,7 @@ provides:
     # demand: counts of created/updated entities, any warnings, the
     # detected worktree authority for each spec, and any drift between
     # filesystem state and Linear's current state.
-    - name: "speckit.linear.status"
+    - name: "speckit.linear-sync.status"
       file: "commands/linear-status.md"
       description: "Report sync status: per-spec phase, worktree write-authority (FR-025), and any drift between filesystem and Linear."
 
@@ -128,16 +128,16 @@ provides:
     # writes `workflow_state_uuids` into the per-repo config (FR-032).
     # Safe to re-run; required before the first `push` against a fresh
     # workspace (per FR-022 push halts cleanly when seed has not run).
-    - name: "speckit.linear.seed"
+    - name: "speckit.linear-sync.seed"
       file: "commands/linear-seed.md"
-      description: "One-shot seed: create required Linear labels + workflow states, capture their UUIDs into .specify/extensions/linear/config.yml. Safe to re-run."
+      description: "One-shot seed: create required Linear labels + workflow states, capture their UUIDs into .specify/extensions/linear-sync/config.yml. Safe to re-run."
 
     # FR-018 / FR-018b — the install ceremony invoked once per consumer
     # repo. Verifies every dependency it touches (`.mcp.json`, Linear
     # OAuth, `gh` CLI, local git hook writability per FR-033) and prints
     # a structured status report. NOT silent: any unverified dependency
     # is surfaced with exact remediation steps.
-    - name: "speckit.linear.install"
+    - name: "speckit.linear-sync.install"
       file: "commands/linear-install.md"
       description: "Install ceremony: verify Linear MCP wiring, OAuth, gh CLI, local git hooks, and the GitHub Action (FR-027). Prints a structured dependency report per FR-018b; no silent failures."
 
@@ -151,11 +151,11 @@ provides:
   # disable any individual hook by editing `.specify/extensions.yml`
   # (`enabled: false`); the bridge MUST honour that on re-install.
   #
-  # All six hooks point at the same command (`speckit.linear.push`)
+  # All six hooks point at the same command (`speckit.linear-sync.push`)
   # because reconcile is the single convergent operation — there is no
   # per-phase specialisation. The host agent runs `speckit-taskstoissues`'s
   # post-execution machinery to translate the dot-name into
-  # `/spec-kit-linear-push` and dispatch it.
+  # `/spec-kit-linear-sync-push` and dispatch it.
   #
   # NO `before_*` hooks: this extension never pre-empts a lifecycle step,
   # it only follows them. (Contrast with speckit-red-team, which gates
@@ -167,7 +167,7 @@ provides:
     # re-discovered by `speckit-spec:NNN` label per FR-004b) and lands in
     # the "Specifying" workflow state with `phase:specifying` label.
     after_specify:
-      - command: "speckit.linear.push"
+      - command: "speckit.linear-sync.push"
         description: "Reconcile after /speckit-specify so the new spec Issue exists in Linear with the correct initial phase."
         prompt: "Reconciling spec.md → Linear..."
         optional: false
@@ -178,7 +178,7 @@ provides:
     # spec Issue (FR-015); the phase label stays Clarifying until
     # `/speckit-plan` ratifies the answers into `spec.md`.
     after_clarify:
-      - command: "speckit.linear.push"
+      - command: "speckit.linear-sync.push"
         description: "Reconcile after /speckit-clarify so ratified Q/A bullets appear as comments on the spec Issue."
         prompt: "Reconciling clarification rounds → Linear comments..."
         optional: false
@@ -188,7 +188,7 @@ provides:
     # Planning; the memory block (FR-004) refreshes; plan section
     # summaries are mirrored as comments per FR-008.
     after_plan:
-      - command: "speckit.linear.push"
+      - command: "speckit.linear-sync.push"
         description: "Reconcile after /speckit-plan so the spec Issue advances to Planning and plan summaries appear as comments."
         prompt: "Reconciling plan.md → Linear..."
         optional: false
@@ -199,7 +199,7 @@ provides:
     # inter-task-phase blocking relations are written (FR-007). This is
     # the hook that does the most Linear work in a typical lifecycle.
     after_tasks:
-      - command: "speckit.linear.push"
+      - command: "speckit.linear-sync.push"
         description: "Reconcile after /speckit-tasks so each Phase N becomes a Linear sub-issue with the right checklist and blocking relations."
         prompt: "Reconciling tasks.md → Linear sub-issues..."
         optional: false
@@ -210,7 +210,7 @@ provides:
     # one-way semantics obvious to the operator); the memory block's
     # current-task pointer (FR-004) updates.
     after_implement:
-      - command: "speckit.linear.push"
+      - command: "speckit.linear-sync.push"
         description: "Reconcile after /speckit-implement so checklist completion state and current-task memory refresh in Linear."
         prompt: "Reconciling implementation progress → Linear..."
         optional: false
@@ -220,7 +220,7 @@ provides:
     # the spec Issue (FR-008); the spec advances toward Ready-to-merge
     # if the PR layer (FR-027/FR-028) is wired.
     after_analyze:
-      - command: "speckit.linear.push"
+      - command: "speckit.linear-sync.push"
         description: "Reconcile after /speckit-analyze so analyze findings appear as comments on the spec Issue."
         prompt: "Reconciling analyze findings → Linear comments..."
         optional: false
@@ -230,8 +230,8 @@ provides:
   # `config:` — INFORMATIONAL per the recon report.
   # The CLI does NOT auto-scaffold this file on install (extensions.py
   # never reads `config[].template` to rename/copy it). The runtime config
-  # `linear-config.yml` is created by `speckit.linear.install` /
-  # `speckit.linear.seed`, which copy `config-template.yml` into place
+  # `linear-config.yml` is created by `speckit.linear-sync.install` /
+  # `speckit.linear-sync.seed`, which copy `config-template.yml` into place
   # and then mutate it (project UUID, team UUID, `workflow_state_uuids`
   # map per FR-032).
   #

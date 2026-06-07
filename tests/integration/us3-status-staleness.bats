@@ -3,7 +3,7 @@
 # =============================================================================
 # tests/integration/us3-status-staleness.bats — T051
 #
-# User Story 3 (P2) — `speckit.linear.status` is a per-spec drift report
+# User Story 3 (P2) — `speckit.linear-sync.status` is a per-spec drift report
 # that NEVER writes to Linear (spec.md FR-025, FR-026 read-only display
 # semantics, SC-009).
 #
@@ -186,10 +186,10 @@ EOF
     SANDBOX_REPO="${BATS_TEST_TMPDIR}/repo"
     MOCK_BIN="${BATS_TEST_TMPDIR}/bin"
     MOCK_LINEAR_STATE="${BATS_TEST_TMPDIR}/mock-linear-state"
-    LINEAR_CONFIG_PATH="${SANDBOX_REPO}/.specify/extensions/linear/linear-config.yml"
+    LINEAR_CONFIG_PATH="${SANDBOX_REPO}/.specify/extensions/linear-sync/linear-config.yml"
 
     mkdir -p "$SANDBOX_REPO" "$MOCK_BIN" "$MOCK_LINEAR_STATE"
-    mkdir -p "${SANDBOX_REPO}/.specify/extensions/linear"
+    mkdir -p "${SANDBOX_REPO}/.specify/extensions/linear-sync"
     mkdir -p "${SANDBOX_REPO}/specs"
 
     export SANDBOX_REPO MOCK_BIN MOCK_LINEAR_STATE LINEAR_CONFIG_PATH

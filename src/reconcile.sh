@@ -9,7 +9,7 @@
 # =============================================================================
 # src/reconcile.sh — the spec-kit ↔ Linear reconciler (Layer D).
 #
-# This is the ENTRY-POINT script the `speckit.linear.push` command, every
+# This is the ENTRY-POINT script the `speckit.linear-sync.push` command, every
 # `after_*` hook, and every local git hook funnel into. It implements
 # every filesystem → Linear mutation path documented in
 # `specs/001-spec-kit-linear-bridge/contracts/linear-graphql-mutations.md`
@@ -97,7 +97,7 @@ source "${SCRIPT_DIR}/parser.sh"
 # Default config path. Resolved relative to PWD (the consumer repo's
 # root) rather than to the script, so the same script binary serves
 # every consumer repo's invocation.
-readonly RECONCILE_CONFIG_PATH_DEFAULT=".specify/extensions/linear/linear-config.yml"
+readonly RECONCILE_CONFIG_PATH_DEFAULT=".specify/extensions/linear-sync/linear-config.yml"
 
 # Cap on the verbatim Overview body before we truncate to the first
 # paragraph (split on `\n\n`) + ellipsis. Linear descriptions are
@@ -154,7 +154,7 @@ declare -g _RECONCILE_OPERATOR_WARNED=0
 # "no agent identifier resolved" diagnostic fires exactly once
 # per reconcile run rather than once per Issue created. NOT a
 # warning — absence of an AI agent context is a legitimate
-# operating mode (manual /spec-kit-linear-push invocation from a
+# operating mode (manual /spec-kit-linear-sync-push invocation from a
 # plain shell, CI worker, etc.), so we only log it at debug level
 # via reconcile::log. The label stamp is silently omitted.
 declare -g _RECONCILE_AGENT_RESOLVED_LOGGED=0
@@ -246,7 +246,7 @@ Options:
                    nothing. Use --all to enumerate every spec.
   --quiet          Suppress per-mutation log lines. Summary still emits.
   --config PATH    Override the path to linear-config.yml
-                   (default: .specify/extensions/linear/linear-config.yml).
+                   (default: .specify/extensions/linear-sync/linear-config.yml).
   --help           Show this help.
 
 Exit codes:
@@ -426,7 +426,7 @@ reconcile::parse_args() {
 reconcile::load_config() {
     local path="${RECONCILE_CONFIG_PATH}"
     if [[ ! -e "$path" ]]; then
-        summary::add error "linear-config.yml not found at ${path}; run /spec-kit-linear-install"
+        summary::add error "linear-config.yml not found at ${path}; run /spec-kit-linear-sync-install"
         reconcile::promote_exit 2
         return 2
     fi
@@ -632,7 +632,7 @@ reconcile::render_memory_block() {
     # FR-036: append a `Last reconciled by` row when an AI agent is
     # driving the reconcile (CLAUDE_CODE_MODEL / CODEX_MODEL / AGENT_NAME).
     # Empty model ⇒ omit the row entirely so plain-shell reconciles
-    # (manual /spec-kit-linear-push from a worker, CI without an agent
+    # (manual /spec-kit-linear-sync-push from a worker, CI without an agent
     # identifier) render the memory block unchanged. Co-bound to the
     # existing description idempotency probe upstream: a no-op
     # reconcile by a different agent will NOT mutate just to bump this
@@ -1011,7 +1011,7 @@ reconcile::subissue_state_key() {
 #     `task-phase:10..N` minted lazily here. Mirrors the speckit-spec
 #     auto-create shape (`allow_create=1`); same workspace-scope and
 #     idempotency semantics. Color: RECONCILE_TASK_PHASE_LABEL_COLOR.
-#   * `phase:*` — MUST already exist (seeded by `speckit.linear.seed`).
+#   * `phase:*` — MUST already exist (seeded by `speckit.linear-sync.seed`).
 #     Missing is a hard error per FR-022 ("unseeded halts"); reconciler
 #     aggregates the failure and points at the seed remediation.
 #   * Any other label (operator-added) — looked up but never created.
@@ -1159,7 +1159,7 @@ reconcile::_resolve_label_id() {
     # set can be lazy-extended to `task-phase:10..N` for specs with
     # 10+ phases (downstream dogfood bug, mirrors FR-004b precedent).
     if [[ "$name" == phase:* ]]; then
-        summary::add error "label '${name}' not found in Linear; run \`speckit.linear.seed\` to create phase:* labels"
+        summary::add error "label '${name}' not found in Linear; run \`speckit.linear-sync.seed\` to create phase:* labels"
     else
         summary::add error "label '${name}' not found in Linear; create it manually or remove it from the spec"
     fi

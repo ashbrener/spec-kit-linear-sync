@@ -21,7 +21,7 @@
 #             on merge per FR-013, but the loose contract permits 8 or 9
 #             depending on implementation) and `task-phase:1..9` families
 #           * writes the resolved `workflow_state_uuids` map into
-#             `.specify/extensions/linear/linear-config.yml` with all
+#             `.specify/extensions/linear-sync/linear-config.yml` with all
 #             nine keys populated by valid UUIDs (not the
 #             zero-placeholder shape).
 #         Exit 0. Summary surfaces the create counts.

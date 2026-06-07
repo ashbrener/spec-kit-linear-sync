@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-07
+
+### Changed — BREAKING: extension id renamed `linear` → `linear-sync`
+
+The extension id is now `linear-sync`, aligning the install handle and command
+surface with the repository name (`spec-kit-linear-sync`). **Breaking:**
+
+- Install handle: `specify extension add linear` → `specify extension add linear-sync`
+- Commands: `/speckit.linear.*` → `/speckit.linear-sync.*` (push, pull, status, seed, install)
+- Consumer install path: `.specify/extensions/linear/` → `.specify/extensions/linear-sync/`
+
+**Migration:** re-install with `specify extension add linear-sync --from <v0.3.0 zip>`,
+then remove the old `.specify/extensions/linear/` directory. Earlier changelog
+entries describe prior `linear`-id behavior and are left as historical record.
+
 ## [0.2.2] — 2026-06-07 — Bug-fix round from community reports
 
 Fixes from the first wave of external issue reports (thanks @davieshq, @rcollette).

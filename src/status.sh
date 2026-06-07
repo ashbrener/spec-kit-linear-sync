@@ -10,7 +10,7 @@
 # src/status.sh — per-spec drift report (Layer D, READ-ONLY inspect command).
 #
 # Implements User Story 3 (P2 — "Cross-repo unified view"; T051) and the
-# `speckit.linear.status` slice of `contracts/command-shapes.md`. Surfaces
+# `speckit.linear-sync.status` slice of `contracts/command-shapes.md`. Surfaces
 # disk-side facts (lifecycle phase, current branch, worktree authority,
 # last-touched timestamp), Linear-side facts (workflow state, phase label,
 # sub-issue completion counts, last activity), and the drift signals
@@ -18,7 +18,7 @@
 #
 # Touched filesystem requirements:
 #   `specs/NNN-feature/` (one or more)
-#   `.specify/extensions/linear/linear-config.yml`
+#   `.specify/extensions/linear-sync/linear-config.yml`
 #   `.env` (only when LINEAR_API_KEY is not already exported)
 #
 # The command is the inverse of `src/reconcile.sh`: same module surface,
@@ -32,7 +32,7 @@
 # -----------------------------------------------------------------------------
 # Principle I (filesystem-is-truth) — read-only; surfaces drift, does not
 #   reconcile it. Operators see what's out-of-sync and can choose to run
-#   `speckit.linear.push` (which has its own write-authority gate).
+#   `speckit.linear-sync.push` (which has its own write-authority gate).
 # Principle II (reconcile, never event-push) — every invocation reads
 #   full filesystem state and queries Linear; no diff cache, no sidecar.
 # Principle III (layered idempotency) — read-only by definition; no
@@ -50,7 +50,7 @@
 # -----------------------------------------------------------------------------
 # CLI surface (per task brief T051)
 # -----------------------------------------------------------------------------
-#   speckit.linear.status [--spec NNN | --all] [--json | --human] [--no-color]
+#   speckit.linear-sync.status [--spec NNN | --all] [--json | --human] [--no-color]
 #
 # Defaults: `--all --human`.
 #
@@ -89,7 +89,7 @@ source "${SCRIPT_DIR}/parser.sh"
 
 # Default config path. Resolved relative to PWD (the consumer repo's
 # root) — matches the convention in reconcile.sh and seed.sh.
-readonly STATUS_CONFIG_PATH_DEFAULT=".specify/extensions/linear/linear-config.yml"
+readonly STATUS_CONFIG_PATH_DEFAULT=".specify/extensions/linear-sync/linear-config.yml"
 
 # Spec-directory glob used when --all is in effect. Matches the canonical
 # `specs/NNN-feature/` layout (three or more leading digits, dash, slug).
@@ -139,7 +139,7 @@ Options:
   --human          Emit a coloured table on stdout (default).
   --no-color       Force monochrome regardless of tty / NO_COLOR.
   --config PATH    Override the path to linear-config.yml
-                   (default: .specify/extensions/linear/linear-config.yml).
+                   (default: .specify/extensions/linear-sync/linear-config.yml).
   --help           Show this help.
 
 Exit codes:
@@ -782,7 +782,7 @@ status::emit_human() {
     printf -v header 'NNN\tNAME\tDISK PHASE\tDISK TASKS\tAUTH\tLINEAR ID\tLINEAR STATE\tDRIFT'
 
     if [[ -z "$STATUS_HUMAN_ROWS" ]]; then
-        printf 'speckit.linear.status: no specs found under specs/\n'
+        printf 'speckit.linear-sync.status: no specs found under specs/\n'
         return 0
     fi
 
@@ -834,7 +834,7 @@ main() {
     # config per FR-022.
     if ! config::load "$STATUS_CONFIG_PATH"; then
         printf 'spec-kit-linear: status: cannot load config at %s\n' "$STATUS_CONFIG_PATH" >&2
-        printf 'hint: copy config-template.yml to %s and run /spec-kit-linear-install\n' \
+        printf 'hint: copy config-template.yml to %s and run /spec-kit-linear-sync-install\n' \
             "$STATUS_CONFIG_PATH" >&2
         summary::add error "config load failed: ${STATUS_CONFIG_PATH}"
         summary::emit

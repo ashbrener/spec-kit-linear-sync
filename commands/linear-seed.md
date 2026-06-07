@@ -1,5 +1,5 @@
 ---
-name: speckit.linear.seed
+name: speckit.linear-sync.seed
 description: One-shot seed of a Linear workspace — creates the 9 lifecycle workflow states, 18 workspace labels, captures every UUID into linear-config.yml
 arguments:
   - name: team
@@ -13,7 +13,7 @@ arguments:
     optional: true
 ---
 
-# `/speckit.linear.seed`
+# `/speckit.linear-sync.seed`
 
 ## Summary
 
@@ -28,7 +28,7 @@ eighteen workspace-scoped issue labels (`phase:*` and `task-phase:N`).
 After the writes settle, captures every returned UUID and splices the
 two resulting maps — `workflow_state_uuids` and `default_state_uuids` —
 into the consumer repo's
-`.specify/extensions/linear/linear-config.yml`.
+`.specify/extensions/linear-sync/linear-config.yml`.
 
 **Cardinality**: one-shot per Linear workspace. Run it once when you
 adopt the bridge in a fresh workspace; never wire it to a hook. Safe to
@@ -51,7 +51,7 @@ drift-aware in v2.0.0 — scopes only spec-level writes).
 The deterministic work happens in `src/seed.sh`; this command is the
 AI-agent entry point that runs the shell and surfaces its output. The
 formal API contract is `contracts/command-shapes.md` §4
-(`speckit.linear.seed`); the mutations issued are enumerated in
+(`speckit.linear-sync.seed`); the mutations issued are enumerated in
 `contracts/linear-graphql-mutations.md` §2. Operators reading this
 file are looking at the markdown the AI agent reads — the same
 operations are available via `bash src/seed.sh` directly. For the
@@ -88,7 +88,7 @@ Principle II.
 
 | Argument | Default | Meaning |
 |---|---|---|
-| `team` | `linear.team.id` from `linear-config.yml` | UUID of the Linear team to seed. Required only when running before `/spec-kit-linear-install` has populated the per-repo config (e.g. first-time bootstrap, sibling-repo dogfood). |
+| `team` | `linear.team.id` from `linear-config.yml` | UUID of the Linear team to seed. Required only when running before `/spec-kit-linear-sync-install` has populated the per-repo config (e.g. first-time bootstrap, sibling-repo dogfood). |
 | `dry-run` | false | Log every mutation that WOULD fire; issue none. Also skips the `linear-config.yml` write. Safe inspection mode. |
 | `workspace-only` | false | Run the Linear-side workspace mutations only; do NOT write captured UUIDs back to `linear-config.yml`. Use this when you want to verify the workspace state from a non-bridge-installed context (e.g. dogfood from a sibling repo) without touching this repo's config. |
 
@@ -97,7 +97,7 @@ Principle II.
 ### CLI shape
 
 ```text
-speckit.linear.seed [--team UUID] [--dry-run] [--workspace-only]
+speckit.linear-sync.seed [--team UUID] [--dry-run] [--workspace-only]
 ```
 
 Default: read team from `linear-config.yml`; full write path.
@@ -121,9 +121,9 @@ Default: read team from `linear-config.yml`; full write path.
    - `jq` is installed (`command -v jq`). `curl` is installed
      (`command -v curl`).
    - Either `--team UUID` was passed OR the consumer repo's config is
-     present at `.specify/extensions/linear/linear-config.yml` with
+     present at `.specify/extensions/linear-sync/linear-config.yml` with
      a populated `linear.team.id`. If both are missing, surface
-     "Run `/spec-kit-linear-install` first, or pass `--team <UUID>`"
+     "Run `/spec-kit-linear-sync-install` first, or pass `--team <UUID>`"
      and exit without invoking the seed.
    - `LINEAR_API_KEY` is set in `.env` or the shell environment. The
      seed step is one of the two paths in the bridge that legitimately
@@ -145,7 +145,7 @@ Default: read team from `linear-config.yml`; full write path.
    - Loads `linear-config.yml` (`src/config.sh`) when no `--team`
      override is supplied. On missing config the script halts with
      exit 2 and the actionable diagnostic "no --team UUID supplied
-     and .specify/extensions/linear/linear-config.yml not found".
+     and .specify/extensions/linear-sync/linear-config.yml not found".
    - For each of the nine canonical lifecycle workflow states
      (per the table below), queries
      `workflowStates(filter: { team, name })`:
@@ -171,13 +171,13 @@ Default: read team from `linear-config.yml`; full write path.
      The `speckit-spec:NNN` labels are NOT seeded — those are minted
      lazily per spec by `src/reconcile.sh` (FR-004b).
    - Splices the two captured UUID maps into
-     `.specify/extensions/linear/linear-config.yml` under
+     `.specify/extensions/linear-sync/linear-config.yml` under
      `linear.workflow_state_uuids` (9 keys) and
      `linear.default_state_uuids` (3 keys), preserving every other
      field in the file verbatim. When the file doesn't yet exist
      (fresh consumer repo, pre-install), the script copies
      `config-template.yml` into place first and warns the operator
-     to run `/spec-kit-linear-install` next to fill in
+     to run `/spec-kit-linear-sync-install` next to fill in
      `linear.team.id` and `linear.project.id`.
 
 4. **Render the structured summary.** `src/seed.sh` emits a block to
@@ -263,7 +263,7 @@ to `linear-config.yml`; the agent reads the file and prints a tidy
 view like:
 
 ```text
-Workflow state UUIDs (written to .specify/extensions/linear/linear-config.yml):
+Workflow state UUIDs (written to .specify/extensions/linear-sync/linear-config.yml):
   specifying:     a1b2c3d4-…
   clarifying:     b2c3d4e5-…
   planning:       c3d4e5f6-…
@@ -281,15 +281,15 @@ Default state UUIDs (Todo / In Progress / Done from the team's stock states):
 ```
 
 This view is the load-bearing handoff between seed and reconcile:
-the next `/spec-kit-linear-push` reads these UUIDs from
+the next `/spec-kit-linear-sync-push` reads these UUIDs from
 `linear-config.yml` and never queries Linear by state name (FR-032 /
 Principle V).
 
 ## When this command fires
 
-- **Operator-driven.** `/spec-kit-linear-seed` from the AI agent
+- **Operator-driven.** `/spec-kit-linear-sync-seed` from the AI agent
   chat — the canonical adoption path, run once per Linear workspace
-  immediately after `/spec-kit-linear-install`.
+  immediately after `/spec-kit-linear-sync-install`.
 - **On-demand shell.** `bash src/seed.sh [flags]` — same outcome
   per Principle II / FR-011.
 - **NOT hook-wired.** Seed is one-shot per workspace and must not
@@ -297,9 +297,9 @@ Principle V).
   waste 27 queries per `/speckit-*` invocation without any
   functional benefit.
 
-If the operator runs `/spec-kit-linear-push` against a workspace that
+If the operator runs `/spec-kit-linear-sync-push` against a workspace that
 has never been seeded, the reconciler halts with exit 2 and
-"Run `/spec-kit-linear-seed` first" (FR-022). Re-running the seed in
+"Run `/spec-kit-linear-sync-seed` first" (FR-022). Re-running the seed in
 that case completes the missing state and lets the next reconcile
 proceed.
 
@@ -320,9 +320,9 @@ Each failure mode is surfaced as a named warning or error in the
 summary (Principle VIII) so the operator can act on it without
 trawling logs:
 
-- `no --team UUID supplied and .specify/extensions/linear/linear-config.yml
+- `no --team UUID supplied and .specify/extensions/linear-sync/linear-config.yml
   not found` — exit 2. The seed halts before any Linear mutation;
-  the operator runs `/spec-kit-linear-install` (or passes `--team`).
+  the operator runs `/spec-kit-linear-sync-install` (or passes `--team`).
 - `workflowStates query returned N matches for name='<name>' on team
   <team>; skipping create — operator must disambiguate manually` —
   an operator has manually created a duplicate workflow state with
@@ -345,25 +345,25 @@ trawling logs:
   The operator restores the stock state in Linear or manually
   populates the UUID in the config.
 - `<path> was missing; copied from <template>. Run
-  /spec-kit-linear-install to fill in linear.team.id and
+  /spec-kit-linear-sync-install to fill in linear.team.id and
   linear.project.id.` — fresh-consumer-repo bootstrap. The seed
   emits the captured workflow-state and default-state UUIDs into the
   copied template, but the operator still has to run
-  `/spec-kit-linear-install` to populate the team + project UUIDs
-  before `/spec-kit-linear-push` will work.
+  `/spec-kit-linear-sync-install` to populate the team + project UUIDs
+  before `/spec-kit-linear-sync-push` will work.
 
 ## Related commands
 
-- `/speckit.linear.install` — per-repo install ceremony. Run once
+- `/speckit.linear-sync.install` — per-repo install ceremony. Run once
   per consumer repo BEFORE the first seed; populates
   `linear.team.id` and `linear.project.id` so the seed knows which
   team to mutate.
-- `/speckit.linear.push` — the reconcile entry point. Requires the
+- `/speckit.linear-sync.push` — the reconcile entry point. Requires the
   seed to have run at least once per workspace; halts with FR-022
   otherwise.
-- `/speckit.linear.pull` — read-only Linear inspector. Works after
+- `/speckit.linear-sync.pull` — read-only Linear inspector. Works after
   install + seed even before the first push.
-- `/speckit.linear.status` — drift report. Same prereq.
+- `/speckit.linear-sync.status` — drift report. Same prereq.
 
 See `contracts/command-shapes.md` for the formal contract on each
 and

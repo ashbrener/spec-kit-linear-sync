@@ -10,7 +10,7 @@
 # src/pull.sh — cross-repo unified spec view (Layer D, READ-ONLY).
 #
 # Implements User Story 3 (P2 — "Cross-repo unified view"; T052) and the
-# `speckit.linear.pull` slice of `contracts/command-shapes.md`. The
+# `speckit.linear-sync.pull` slice of `contracts/command-shapes.md`. The
 # partner to `src/status.sh`: where status is filesystem-anchored and
 # drift-aware, pull is Linear-anchored and inventory-aware. Returns
 # "every spec across every repo bound to the operator's workspace"
@@ -59,7 +59,7 @@
 # -----------------------------------------------------------------------------
 # CLI surface (per task brief T052)
 # -----------------------------------------------------------------------------
-#   speckit.linear.pull [--repo | --workspace-wide]
+#   speckit.linear-sync.pull [--repo | --workspace-wide]
 #                       [--phase PHASE | --all-phases]
 #                       [--json | --human]
 #                       [--no-color]
@@ -92,7 +92,7 @@ source "${SCRIPT_DIR}/summary.sh"
 # Module constants.
 # -----------------------------------------------------------------------------
 
-readonly PULL_CONFIG_PATH_DEFAULT=".specify/extensions/linear/linear-config.yml"
+readonly PULL_CONFIG_PATH_DEFAULT=".specify/extensions/linear-sync/linear-config.yml"
 
 # Memory-block fences — copied from status.sh / reconcile.sh so we can
 # parse out the recorded branch / worktree pointers from spec Issue
@@ -659,7 +659,7 @@ pull::emit_human() {
     local row_count
     row_count="$(printf '%s' "$rows_json" | jq 'length')"
     if (( row_count == 0 )); then
-        printf 'speckit.linear.pull: no spec Issues found\n'
+        printf 'speckit.linear-sync.pull: no spec Issues found\n'
         if [[ -n "$ARG_PHASE" ]]; then
             printf '  (filter: --phase %s)\n' "$ARG_PHASE"
         fi
@@ -780,7 +780,7 @@ main() {
     # be set to a real Project (the workspace scope sidesteps it).
     if ! config::load "$PULL_CONFIG_PATH"; then
         printf 'spec-kit-linear: pull: cannot load config at %s\n' "$PULL_CONFIG_PATH" >&2
-        printf 'hint: copy config-template.yml to %s and run /spec-kit-linear-install\n' \
+        printf 'hint: copy config-template.yml to %s and run /spec-kit-linear-sync-install\n' \
             "$PULL_CONFIG_PATH" >&2
         summary::add error "config load failed: ${PULL_CONFIG_PATH}"
         summary::emit
@@ -809,7 +809,7 @@ main() {
         if [[ -z "$project_uuid" ]]; then
             printf 'spec-kit-linear: pull: --repo requires linear.project.id in %s\n' \
                 "$PULL_CONFIG_PATH" >&2
-            printf 'hint: run /spec-kit-linear-install to bind a Project, or use --workspace-wide\n' >&2
+            printf 'hint: run /spec-kit-linear-sync-install to bind a Project, or use --workspace-wide\n' >&2
             summary::add error "linear.project.id missing for --repo scope"
             summary::emit
             exit 2

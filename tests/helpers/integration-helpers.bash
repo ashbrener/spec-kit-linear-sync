@@ -8,7 +8,7 @@
 # Each integration test mounts a hermetic sandbox that looks like a real
 # consumer repo: a fresh git repo with `specs/NNN-feature/` populated
 # from one of the existing fixtures, a populated
-# `.specify/extensions/linear/linear-config.yml`, and a mocked Linear
+# `.specify/extensions/linear-sync/linear-config.yml`, and a mocked Linear
 # transport (curl shim) + a mocked `gh` (when PR-state is consulted).
 #
 # Reconcile-time the bridge talks to Linear exclusively via `src/graphql.sh`
@@ -102,7 +102,7 @@ integration::skip_unless_enabled() {
 #
 # Build a hermetic consumer-repo sandbox at $SANDBOX_REPO with the
 # given fixture spec mounted at specs/<fixture_name>/, the bridge's
-# .specify/extensions/linear/linear-config.yml populated with valid
+# .specify/extensions/linear-sync/linear-config.yml populated with valid
 # UUIDs, and the working tree checked out on a branch named after the
 # fixture (so the write-authority gate per FR-025 lets the reconciler
 # write).
@@ -120,10 +120,10 @@ integration::setup_sandbox() {
     SANDBOX_REPO="${BATS_TEST_TMPDIR}/repo"
     MOCK_BIN="${BATS_TEST_TMPDIR}/bin"
     MOCK_LINEAR_STATE="${BATS_TEST_TMPDIR}/mock-linear-state"
-    LINEAR_CONFIG_PATH="${SANDBOX_REPO}/.specify/extensions/linear/linear-config.yml"
+    LINEAR_CONFIG_PATH="${SANDBOX_REPO}/.specify/extensions/linear-sync/linear-config.yml"
 
     mkdir -p "$SANDBOX_REPO" "$MOCK_BIN" "$MOCK_LINEAR_STATE"
-    mkdir -p "${SANDBOX_REPO}/.specify/extensions/linear"
+    mkdir -p "${SANDBOX_REPO}/.specify/extensions/linear-sync"
     mkdir -p "${SANDBOX_REPO}/specs"
 
     export SANDBOX_REPO MOCK_BIN MOCK_LINEAR_STATE LINEAR_CONFIG_PATH
@@ -591,7 +591,7 @@ integration::run_seed() {
 # integration::setup_bare_sandbox
 #
 # Build a hermetic consumer-repo sandbox that does NOT yet have the
-# bridge installed: no `.specify/extensions/linear/linear-config.yml`,
+# bridge installed: no `.specify/extensions/linear-sync/linear-config.yml`,
 # no `.specify/extensions.yml`, no `.git/hooks/post-checkout` from the
 # bridge. Used by US4 (install + seed ceremony) and by US2 install-test
 # scenarios that need to exercise the install path itself.
@@ -604,10 +604,10 @@ integration::setup_bare_sandbox() {
     SANDBOX_REPO="${BATS_TEST_TMPDIR}/repo"
     MOCK_BIN="${BATS_TEST_TMPDIR}/bin"
     MOCK_LINEAR_STATE="${BATS_TEST_TMPDIR}/mock-linear-state"
-    LINEAR_CONFIG_PATH="${SANDBOX_REPO}/.specify/extensions/linear/linear-config.yml"
+    LINEAR_CONFIG_PATH="${SANDBOX_REPO}/.specify/extensions/linear-sync/linear-config.yml"
 
     mkdir -p "$SANDBOX_REPO" "$MOCK_BIN" "$MOCK_LINEAR_STATE"
-    mkdir -p "${SANDBOX_REPO}/.specify/extensions/linear"
+    mkdir -p "${SANDBOX_REPO}/.specify/extensions/linear-sync"
     mkdir -p "${SANDBOX_REPO}/specs"
 
     export SANDBOX_REPO MOCK_BIN MOCK_LINEAR_STATE LINEAR_CONFIG_PATH

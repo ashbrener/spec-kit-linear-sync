@@ -1,5 +1,5 @@
 ---
-name: speckit.linear.push
+name: speckit.linear-sync.push
 description: Reconcile filesystem spec state into Linear (FS → Linear, idempotent)
 arguments:
   - name: spec
@@ -16,7 +16,7 @@ arguments:
     optional: true
 ---
 
-# `/speckit.linear.push`
+# `/speckit.linear-sync.push`
 
 ## Summary
 
@@ -45,19 +45,19 @@ default (override with `on-drift=abort`). It NEVER refuses the write of
 its own accord (warn, don't block). Forward / no-drift writes proceed
 silently. Spec 003 (`003-drift-aware-authority`, FR-051..FR-064)
 implements this. FR-026's current-state surfacing obligation is
-retained (FR-060): `speckit.linear.status` shows Linear's view from any
+retained (FR-060): `speckit.linear-sync.status` shows Linear's view from any
 worktree without writing. See the contracts:
 [drift-warning-surface](../specs/003-drift-aware-authority/contracts/drift-warning-surface.md),
 [recency-comparison](../specs/003-drift-aware-authority/contracts/recency-comparison.md),
 [drift-detection-graphql](../specs/003-drift-aware-authority/contracts/drift-detection-graphql.md).
 **Layer**: this command implements Layer D. The GitHub Action template
-that ships with `/spec-kit-linear-install` implements Layer E and is
+that ships with `/spec-kit-linear-sync-install` implements Layer E and is
 out of scope here.
 
 The deterministic work happens in `src/reconcile.sh`; this command is
 the AI-agent entry point that runs the shell and surfaces its output.
 The formal API contract is `contracts/command-shapes.md` §1
-(`speckit.linear.push`); the mutations issued are enumerated in
+(`speckit.linear-sync.push`); the mutations issued are enumerated in
 `contracts/linear-graphql-mutations.md` §4. Operators reading this
 file are looking at the markdown the AI agent reads — the same
 operations are available via `bash src/reconcile.sh` directly. For
@@ -81,7 +81,7 @@ implied. `dry-run` is orthogonal to `retroactive` and `spec`.
 ### CLI shape
 
 ```text
-speckit.linear.push [--spec NNN | --all] [--dry-run] [--retroactive]
+speckit.linear-sync.push [--spec NNN | --all] [--dry-run] [--retroactive]
 ```
 
 Default: `--all`.
@@ -95,8 +95,8 @@ Default: `--all`.
      `/opt/homebrew/bin/bash` (Apple Silicon) or `/usr/local/bin/bash`
      (Intel) is earlier on `PATH` than `/bin/bash`.
    - The consumer repo's config is present at
-     `.specify/extensions/linear/linear-config.yml`. If absent,
-     surface "run `/spec-kit-linear-install` first" and exit; do NOT
+     `.specify/extensions/linear-sync/linear-config.yml`. If absent,
+     surface "run `/spec-kit-linear-sync-install` first" and exit; do NOT
      attempt to run the reconciler.
    - `jq` is installed (`command -v jq`). `curl` is installed
      (`command -v curl`). `git` is installed and the working directory
@@ -193,22 +193,22 @@ Default: `--all`.
      the summary block verbatim.
    - `1` — partial failure. Some specs failed; others succeeded.
      Surface the warnings from the summary and recommend re-running
-     `/speckit.linear.push spec=<NNN>` for any spec named in the
+     `/speckit.linear-sync.push spec=<NNN>` for any spec named in the
      warnings list.
    - `2` — workspace config error (per FR-022). The script halted
      before any mutation. Surface the exact remediation the script
-     printed (typically: run `/spec-kit-linear-install` or
-     `/spec-kit-linear-seed`). Do NOT retry automatically.
+     printed (typically: run `/spec-kit-linear-sync-install` or
+     `/spec-kit-linear-sync-seed`). Do NOT retry automatically.
    - `3` — transport failure. Linear was unreachable; nothing was
      written. Recommend re-running once network connectivity is
      restored.
 
 ## When this command fires
 
-- **Operator-driven.** `/speckit.linear.push` from the AI agent
+- **Operator-driven.** `/speckit.linear-sync.push` from the AI agent
   chat — the primary on-demand path for recovery from missed hooks
   and ad-hoc reconcile.
-- **Auto-fired hooks** (post-install via `/spec-kit-linear-install`).
+- **Auto-fired hooks** (post-install via `/spec-kit-linear-sync-install`).
   Every `/speckit-*` lifecycle command in `.specify/extensions.yml`
   is wired to invoke this command per FR-031.
 - **Local git hooks** (`post-checkout`, `post-commit`, `post-merge`)
@@ -261,17 +261,17 @@ logs:
   unchanged` — the operator (or `on-drift=abort`) chose to skip a
   drifted spec; zero Linear mutation for that spec (FR-057).
 - `linear-config.yml not found at <path>; run
-  /spec-kit-linear-install` — FR-022 halt. Exit code 2.
+  /spec-kit-linear-sync-install` — FR-022 halt. Exit code 2.
 
 ## Related commands
 
-- `/speckit.linear.pull` — read-only inspect Linear's current view
+- `/speckit.linear-sync.pull` — read-only inspect Linear's current view
   (works from any worktree, never mutates).
-- `/speckit.linear.status` — drift report (filesystem vs Linear)
+- `/speckit.linear-sync.status` — drift report (filesystem vs Linear)
   without actually issuing mutations.
-- `/speckit.linear.seed` — one-shot workspace setup. Run once per
+- `/speckit.linear-sync.seed` — one-shot workspace setup. Run once per
   Linear workspace before the first push.
-- `/speckit.linear.install` — per-repo install ceremony. Run once
+- `/speckit.linear-sync.install` — per-repo install ceremony. Run once
   per consumer repo before the first push.
 
 See `contracts/command-shapes.md` for the formal contract on each

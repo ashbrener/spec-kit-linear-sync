@@ -3,7 +3,7 @@
 # =============================================================================
 # src/install.sh — install ceremony for the spec-kit-linear bridge.
 #
-# Implements `speckit.linear.install` per
+# Implements `speckit.linear-sync.install` per
 # `specs/001-spec-kit-linear-bridge/contracts/command-shapes.md` §5
 # (FR-002, FR-018, FR-018b, FR-019, FR-020, FR-027, FR-029, FR-031,
 # FR-033). The script's role is the per-consumer-repo first-run
@@ -65,9 +65,9 @@ source "${SCRIPT_DIR}/graphql.sh"
 
 # Where the per-repo config lives (data-model.md §2.5). The install step
 # writes a copy of `config-template.yml` here with Team + Project UUIDs
-# populated; `speckit.linear.seed` later fills `workflow_state_uuids`.
-readonly INSTALL_CONFIG_PATH=".specify/extensions/linear/linear-config.yml"
-readonly INSTALL_CONFIG_DIR=".specify/extensions/linear"
+# populated; `speckit.linear-sync.seed` later fills `workflow_state_uuids`.
+readonly INSTALL_CONFIG_PATH=".specify/extensions/linear-sync/linear-config.yml"
+readonly INSTALL_CONFIG_DIR=".specify/extensions/linear-sync"
 readonly INSTALL_EXTENSIONS_YML=".specify/extensions.yml"
 # Resolved at runtime by install::check_repo_layout (FR-033). NOT a readonly
 # constant: hardcoding `.git/hooks` is wrong in a linked git worktree, where
@@ -95,7 +95,7 @@ readonly INSTALL_CONFIG_TEMPLATE="${EXTENSION_ROOT}/config-template.yml"
 readonly -a INSTALL_GIT_HOOK_NAMES=("post-checkout" "post-commit" "post-merge")
 
 # The six `after_*` hooks auto-registered per FR-031 / Principle VII.
-# All point at the same command (`speckit.linear.push`) because
+# All point at the same command (`speckit.linear-sync.push`) because
 # reconcile is the single convergent operation.
 readonly -a INSTALL_AFTER_HOOK_NAMES=(
     "after_specify"
@@ -130,7 +130,7 @@ INSTALL_FLAG_WITH_ACTION=0
 INSTALL_FLAG_WITH_ACTION_EXPLICIT=0
 # Set by --dev. Surfaces in the dependency report and biases the
 # EXTENSION_ROOT lookup toward the current checkout (rather than the
-# operator-host `~/.specify-extensions/linear/` path the spec-kit CLI
+# operator-host `~/.specify-extensions/linear-sync/` path the spec-kit CLI
 # would normally populate during `specify extension add linear`). See
 # install::main where the flag drives a log marker so the operator
 # knows they're running from a non-shipped tree.
@@ -163,7 +163,7 @@ INSTALL_HAD_HARD_ERROR=0
 
 # Set to 1 by `install::detect_vendored_git` (T204 / FR-049) when the
 # install source carries a `.git/` directory at
-# `<source>/.specify/extensions/linear/.git`. Drives the Next-steps
+# `<source>/.specify/extensions/linear-sync/.git`. Drives the Next-steps
 # remediation row per `install-prompts.md` §7 — the warning surfaces
 # at the dependency-report stage (T259) and is mirrored in the final
 # summary so the operator sees the remediation `rm -rf …` at both
@@ -233,7 +233,7 @@ Usage: install.sh [OPTIONS]
 Per-consumer-repo install ceremony for the spec-kit-linear bridge.
 
 Resolves the Linear Team + Project UUIDs (interactively or via flags),
-writes .specify/extensions/linear/linear-config.yml, registers the six
+writes .specify/extensions/linear-sync/linear-config.yml, registers the six
 after_* hooks in .specify/extensions.yml with optional: false (FR-031),
 installs post-checkout / post-commit / post-merge git hooks per FR-033,
 and (optionally) drops the GitHub Action template per FR-027 / FR-029.
@@ -809,7 +809,7 @@ install::run_dependency_report() {
     # ---- T259 / FR-049: vendored .git/ detection ---------------------------
     # Surface a warning row when the install SOURCE
     # (EXTENSION_ROOT — set near the top of this file) carries a
-    # `.git/` directory at `.specify/extensions/linear/.git`. The
+    # `.git/` directory at `.specify/extensions/linear-sync/.git`. The
     # helper itself emits the row via `summary::add warned` +
     # `install::_log_warn`; install continues per Principle VIII
     # (operator consent — never auto-delete).
@@ -820,12 +820,12 @@ install::run_dependency_report() {
             "$INSTALL_VENDORED_GIT_PATH" \
             "$INSTALL_VENDORED_GIT_PATH" >&2
     else
-        printf '  ✓ install source clean — no vendored .git/ under .specify/extensions/linear/\n' >&2
+        printf '  ✓ install source clean — no vendored .git/ under .specify/extensions/linear-sync/\n' >&2
     fi
 
     if (( INSTALL_HAD_HARD_ERROR == 1 )); then
         printf '\nspec-kit-linear: install: dependency report has unresolved errors (✗ rows above).\n' >&2
-        printf '%s\n' "Resolve every ✗ row and re-run \`/spec-kit-linear-install\`." >&2
+        printf '%s\n' "Resolve every ✗ row and re-run \`/spec-kit-linear-sync-install\`." >&2
         return 1
     fi
     return 0
@@ -993,7 +993,7 @@ install::_create_project() {
     input_json="$(jq -nc \
         --arg name "$project_name" \
         --arg team "$team_uuid" \
-        --arg description "Auto-created by speckit.linear.install for spec-kit lifecycle mirroring." \
+        --arg description "Auto-created by speckit.linear-sync.install for spec-kit lifecycle mirroring." \
         '{
             name: $name,
             teamIds: [$team],
@@ -1243,7 +1243,7 @@ hint: set LINEAR_API_KEY in .env or export it before re-running install"
 
 # install::write_config <team_uuid> <project_uuid>
 #
-# Copy `config-template.yml` into `.specify/extensions/linear/linear-config.yml`
+# Copy `config-template.yml` into `.specify/extensions/linear-sync/linear-config.yml`
 # (unless the file already exists with non-zero UUIDs) and substitute
 # the resolved Team + Project UUIDs in-place. The seed step later
 # fills `workflow_state_uuids`. The operator identity (FR-034)
@@ -1294,7 +1294,7 @@ hint: re-run \`specify extension add linear\` (or pass --dev with a checkout of 
     # T233/T239 — spec 002: populate the linear.team and linear.project
     # informational fields (key, name) when the discovery flow resolved
     # them. The reconciler only reads UUIDs but operator-facing tools
-    # like /spec-kit-linear-status surface the friendly names.
+    # like /spec-kit-linear-sync-status surface the friendly names.
     install::_write_team_block "$INSTALL_CONFIG_PATH"
     install::_write_project_block "$INSTALL_CONFIG_PATH"
     install::_log_info "wrote ${INSTALL_CONFIG_PATH}"
@@ -1702,7 +1702,7 @@ install::_render_hook_block() {
 
     {
         printf '  - extension: linear\n'
-        printf '    command: speckit.linear.push\n'
+        printf '    command: speckit.linear-sync.push\n'
         printf '    enabled: true\n'
         printf '    optional: false\n'
         printf '    prompt: %s\n' "$prompt"
@@ -1992,7 +1992,7 @@ install::install_github_action() {
 #   (1) default: invoke `src/seed.sh` inline so the same install
 #       invocation leaves a fully-seeded workspace,
 #   (2) defer: complete install but warn that subsequent reconciles
-#       will halt per FR-022 until /spec-kit-linear-seed runs,
+#       will halt per FR-022 until /spec-kit-linear-sync-seed runs,
 #   (3) non-interactive: halt with the FR-022 error so CI does not
 #       silently leave an unseeded workspace.
 #
@@ -2056,7 +2056,7 @@ install::prompt_seed_run() {
 
     if install::_workspace_is_seeded "$INSTALL_CONFIG_PATH"; then
         install::_log_info "workspace already seeded (workflow_state_uuids populated); skipping seed prompt"
-        summary::add "skipped" "workspace already seeded — no /spec-kit-linear-seed prompt issued"
+        summary::add "skipped" "workspace already seeded — no /spec-kit-linear-sync-seed prompt issued"
         return 0
     fi
 
@@ -2068,16 +2068,16 @@ install::prompt_seed_run() {
         install::_log_error \
             "workspace unseeded (workflow_state_uuids placeholder zero-UUIDs); --non-interactive cannot prompt"
         install::_log_error \
-            "Run \`bash src/seed.sh --team ${team_uuid}\` (or /spec-kit-linear-seed) before invoking /spec-kit-linear-push (FR-022)"
+            "Run \`bash src/seed.sh --team ${team_uuid}\` (or /spec-kit-linear-sync-seed) before invoking /spec-kit-linear-sync-push (FR-022)"
         summary::add "error" \
-            "workspace unseeded (FR-022); run /spec-kit-linear-seed before /spec-kit-linear-push"
+            "workspace unseeded (FR-022); run /spec-kit-linear-sync-seed before /spec-kit-linear-sync-push"
         INSTALL_SEED_PROMPT_RESULT=2
         return 1
     fi
 
     # Interactive: prompt the operator. Default is RUN (Enter accepts).
     printf '\n[linear] Linear workspace is unseeded for this repo (no workflow_state_uuids).\n' >&2
-    printf '         Run /spec-kit-linear-seed now? [Y/n] (default: Y, "n" defers per FR-022): ' >&2
+    printf '         Run /spec-kit-linear-sync-seed now? [Y/n] (default: Y, "n" defers per FR-022): ' >&2
     local choice=""
     if ! IFS= read -r choice; then
         # No stdin (e.g. piped install with no answer) — treat as defer
@@ -2096,16 +2096,16 @@ install::prompt_seed_run() {
             return $?
             ;;
         n|no|defer)
-            install::_log_warn "operator deferred seed (FR-022): /spec-kit-linear-push will halt until /spec-kit-linear-seed runs"
+            install::_log_warn "operator deferred seed (FR-022): /spec-kit-linear-sync-push will halt until /spec-kit-linear-sync-seed runs"
             summary::add "warned" \
-                "workspace seed deferred; run /spec-kit-linear-seed before /spec-kit-linear-push (FR-022)"
+                "workspace seed deferred; run /spec-kit-linear-sync-seed before /spec-kit-linear-sync-push (FR-022)"
             INSTALL_SEED_PROMPT_RESULT=2
             return 0
             ;;
         *)
             install::_log_warn "unknown seed-prompt choice '${choice}'; treating as defer (FR-022)"
             summary::add "warned" \
-                "workspace seed deferred (unrecognised choice); run /spec-kit-linear-seed before /spec-kit-linear-push (FR-022)"
+                "workspace seed deferred (unrecognised choice); run /spec-kit-linear-sync-seed before /spec-kit-linear-sync-push (FR-022)"
             INSTALL_SEED_PROMPT_RESULT=2
             return 0
             ;;
@@ -2138,7 +2138,7 @@ install::_run_seed_inline() {
         return 0
     fi
     install::_log_error "inline seed failed; install will surface the error"
-    summary::add "error" "inline seed failed; re-run /spec-kit-linear-seed manually before /spec-kit-linear-push"
+    summary::add "error" "inline seed failed; re-run /spec-kit-linear-sync-seed manually before /spec-kit-linear-sync-push"
     INSTALL_SEED_PROMPT_RESULT=2
     return 1
 }
@@ -2323,7 +2323,7 @@ install::detect_self_install() {
 # install::detect_vendored_git <source_path>  (T204, FR-049)
 #
 # Check whether the install source carries a vendored `.git/`
-# directory under `<source>/.specify/extensions/linear/`. When present,
+# directory under `<source>/.specify/extensions/linear-sync/`. When present,
 # emit a `summary::add warned` row with the `rm -rf …` remediation
 # string and CONTINUE the install (Principle VIII — operator consent;
 # do NOT auto-delete).
@@ -2333,7 +2333,7 @@ install::detect_self_install() {
 # -----------------------------------------------------------------------------
 install::detect_vendored_git() {
     local source_path="${1:?install::detect_vendored_git: source_path required}"
-    local vendored_git="${source_path}/.specify/extensions/linear/.git"
+    local vendored_git="${source_path}/.specify/extensions/linear-sync/.git"
 
     if [[ -d "$vendored_git" ]]; then
         # Module-level flag drives the Next-steps remediation row that
@@ -2345,7 +2345,7 @@ install::detect_vendored_git() {
         summary::add "warned" \
             "vendored .git/ detected at ${vendored_git}; remove with: rm -rf ${vendored_git} (FR-049)"
         install::_log_warn \
-            "vendored .git/ detected under .specify/extensions/linear/ — remediation: rm -rf ${vendored_git} (FR-049)"
+            "vendored .git/ detected under .specify/extensions/linear-sync/ — remediation: rm -rf ${vendored_git} (FR-049)"
         return 0
     fi
     return 0
@@ -2974,7 +2974,7 @@ install::create_linear_project() {
     input_json="$(jq -nc \
         --arg name "$project_name" \
         --arg team "$team_uuid" \
-        --arg description "Auto-created by speckit.linear.install for spec-kit lifecycle mirroring." \
+        --arg description "Auto-created by speckit.linear-sync.install for spec-kit lifecycle mirroring." \
         '{ name: $name, teamIds: [$team], description: $description }')"
     vars="$(jq -nc --argjson input "$input_json" '{input: $input}')"
 
@@ -3018,7 +3018,7 @@ Re-run install to try again (your team selection is remembered), or pick an exis
         install::_log_info "Created Linear Project: ${new_url}"
     fi
     install::_log_info \
-        "Project ID is recorded internally and written to .specify/extensions/linear/linear-config.yml."
+        "Project ID is recorded internally and written to .specify/extensions/linear-sync/linear-config.yml."
 }
 
 # -----------------------------------------------------------------------------
@@ -3450,17 +3450,17 @@ install::main() {
             1)
                 printf '  1. Seed completed inline — workflow_state_uuids populated.\n'
                 printf '  2. Commit %s.\n' "$INSTALL_CONFIG_PATH"
-                printf '  3. Verify by running /spec-kit-linear-push --dry-run.\n'
+                printf '  3. Verify by running /spec-kit-linear-sync-push --dry-run.\n'
                 ;;
             2)
-                printf '  1. Run /spec-kit-linear-seed before /spec-kit-linear-push (FR-022).\n'
+                printf '  1. Run /spec-kit-linear-sync-seed before /spec-kit-linear-sync-push (FR-022).\n'
                 printf '  2. Commit %s.\n' "$INSTALL_CONFIG_PATH"
-                printf '  3. Verify by running /spec-kit-linear-push --dry-run.\n'
+                printf '  3. Verify by running /spec-kit-linear-sync-push --dry-run.\n'
                 ;;
             *)
-                printf '  1. Workspace already seeded — skipping /spec-kit-linear-seed.\n'
+                printf '  1. Workspace already seeded — skipping /spec-kit-linear-sync-seed.\n'
                 printf '  2. Commit %s.\n' "$INSTALL_CONFIG_PATH"
-                printf '  3. Verify by running /spec-kit-linear-push --dry-run.\n'
+                printf '  3. Verify by running /spec-kit-linear-sync-push --dry-run.\n'
                 ;;
         esac
         # T259 / FR-049: mirror the vendored-`.git/` warning into the

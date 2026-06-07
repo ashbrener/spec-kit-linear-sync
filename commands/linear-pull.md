@@ -1,5 +1,5 @@
 ---
-name: speckit.linear.pull
+name: speckit.linear-sync.pull
 description: Cross-repo unified spec view from Linear (READ-ONLY; never mutates Linear)
 arguments:
   - name: workspace-wide
@@ -16,7 +16,7 @@ arguments:
     optional: true
 ---
 
-# `/speckit.linear.pull`
+# `/speckit.linear-sync.pull`
 
 ## Summary
 
@@ -24,7 +24,7 @@ Linear-anchored cross-repo inventory of every spec Issue, grouped by
 Project, never mutates Linear.
 
 Cross-repo unified view of every spec Issue Linear knows about. The
-partner to `/speckit.linear.status`: where `status` is filesystem-
+partner to `/speckit.linear-sync.status`: where `status` is filesystem-
 anchored and drift-aware (one repo, comparing disk against Linear),
 `pull` is Linear-anchored and inventory-aware (every spec across every
 repo bound to the operator's workspace, grouped by Project).
@@ -44,7 +44,7 @@ cycle. Safe to run during a deploy, during a CI build, during a merge.
 The deterministic work happens in `src/pull.sh`; this command is the
 AI-agent entry point that runs the shell and surfaces its output. The
 formal API contract is `contracts/command-shapes.md`
-(`speckit.linear.pull` slice). Operators reading this file are looking
+(`speckit.linear-sync.pull` slice). Operators reading this file are looking
 at the markdown the AI agent reads — the same operations are available
 via `bash src/pull.sh` directly. For the operator-facing end-to-end
 walkthrough see
@@ -65,7 +65,7 @@ valid. `json` and `no-color` are orthogonal to scope and phase.
 ### CLI shape
 
 ```text
-speckit.linear.pull [--repo | --workspace-wide]
+speckit.linear-sync.pull [--repo | --workspace-wide]
                     [--phase PHASE | --all-phases]
                     [--json | --human] [--no-color]
 ```
@@ -80,8 +80,8 @@ Default: `--repo --all-phases --human`.
      `/opt/homebrew/bin/bash` (Apple Silicon) or `/usr/local/bin/bash`
      (Intel) is earlier on `PATH` than `/bin/bash`.
    - The consumer repo's config is present at
-     `.specify/extensions/linear/linear-config.yml`. If absent,
-     surface "run `/spec-kit-linear-install` first" and exit 2; do NOT
+     `.specify/extensions/linear-sync/linear-config.yml`. If absent,
+     surface "run `/spec-kit-linear-sync-install` first" and exit 2; do NOT
      attempt to run the inspector.
    - `jq`, `curl`, and `git` are installed.
 
@@ -178,17 +178,17 @@ Default: `--repo --all-phases --human`.
      Recommend re-running once network connectivity is restored.
    - `2` — workspace config error (missing/malformed `linear-config.yml`).
      The script halted before any query. Surface the remediation the
-     script printed (typically: run `/spec-kit-linear-install`).
+     script printed (typically: run `/spec-kit-linear-sync-install`).
    - `3` — transport failure. Linear was unreachable; no rows surfaced.
 
 ## When this command fires
 
-- **Operator-driven** — `/speckit.linear.pull` from the AI agent
+- **Operator-driven** — `/speckit.linear-sync.pull` from the AI agent
   chat. Primary path for "what specs are in flight across my
   workspace?", cross-repo coordination, and Project-level inventory
   checks before a release.
 - **Never auto-fired.** This is NOT wired into any `after_*` hook or
-  any git hook by `/spec-kit-linear-install`. Operator-invoked only.
+  any git hook by `/spec-kit-linear-sync-install`. Operator-invoked only.
 
 ## Output channel discipline
 
@@ -210,7 +210,7 @@ Each failure mode is surfaced as a named warning in the summary
 - `config validation failed` — malformed UUIDs or missing fields. Exit 2.
 - `linear.project.id missing for --repo scope` — operator tried
   `--repo` against a workspace-wide-only config. Suggest
-  `--workspace-wide` or running `/spec-kit-linear-install` to bind a
+  `--workspace-wide` or running `/spec-kit-linear-sync-install` to bind a
   Project. Exit 2.
 - `linear.team.id missing for --workspace-wide scope` — config has no
   team UUID. Exit 2.
@@ -222,15 +222,15 @@ Each failure mode is surfaced as a named warning in the summary
 
 ## Related commands
 
-- `/speckit.linear.status` — disk-vs-Linear drift report for the
+- `/speckit.linear-sync.status` — disk-vs-Linear drift report for the
   current repo. Use this for "is THIS repo in sync?"; use `pull` for
   "what's in flight across EVERY repo?".
-- `/speckit.linear.push` — write path. Reconciles filesystem state
-  into Linear. Use `/speckit.linear.status` or `/speckit.linear.pull`
+- `/speckit.linear-sync.push` — write path. Reconciles filesystem state
+  into Linear. Use `/speckit.linear-sync.status` or `/speckit.linear-sync.pull`
   first to see what WOULD change.
-- `/speckit.linear.seed` — one-shot workspace setup. Run once per
+- `/speckit.linear-sync.seed` — one-shot workspace setup. Run once per
   Linear workspace before the first push.
-- `/speckit.linear.install` — per-repo install ceremony. Run once
+- `/speckit.linear-sync.install` — per-repo install ceremony. Run once
   per consumer repo before the first push.
 
 See `contracts/command-shapes.md` for the formal contract on each

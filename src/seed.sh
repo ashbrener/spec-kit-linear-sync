@@ -23,7 +23,7 @@
 #
 # After the writes settle, the script captures every returned UUID and writes
 # the resolved IDs back into the consumer repo's
-# `.specify/extensions/linear/linear-config.yml`. The two captured maps are:
+# `.specify/extensions/linear-sync/linear-config.yml`. The two captured maps are:
 #
 #   * `linear.workflow_state_uuids` — 9 keys, matching the lifecycle phases
 #     (specifying, clarifying, planning, tasking, red_team, implementing,
@@ -88,12 +88,12 @@ source "${SCRIPT_DIR}/summary.sh"
 # Default config path. Resolved relative to PWD (the consumer repo's root) so
 # the same script binary serves every consumer repo's invocation. Matches the
 # convention in reconcile.sh.
-readonly SEED_CONFIG_PATH_DEFAULT=".specify/extensions/linear/linear-config.yml"
+readonly SEED_CONFIG_PATH_DEFAULT=".specify/extensions/linear-sync/linear-config.yml"
 
 # Path of the template the seed copies from when the consumer repo has not yet
 # materialised its `linear-config.yml`. The template is checked into the
 # extension itself (committed as `config-template.yml` at the repo root, and
-# also under `.specify/extensions/linear/` after `specify extension add
+# also under `.specify/extensions/linear-sync/` after `specify extension add
 # linear`). The fallback search order below covers both.
 readonly SEED_TEMPLATE_BASENAME="config-template.yml"
 
@@ -218,7 +218,7 @@ Usage: seed.sh [--team UUID] [--dry-run] [--workspace-only] [--help]
 
 One-shot Linear workspace seed. Creates the 9 custom lifecycle workflow
 states + 18 workspace labels the bridge relies on, captures every UUID,
-and writes them back into .specify/extensions/linear/linear-config.yml.
+and writes them back into .specify/extensions/linear-sync/linear-config.yml.
 
 Options:
   --team UUID       Override the team UUID. Default: read from
@@ -332,7 +332,7 @@ seed::parse_args() {
 #
 # Order of precedence:
 #   1. --team UUID on the CLI (operator override or non-interactive install).
-#   2. linear.team.id parsed from .specify/extensions/linear/linear-config.yml.
+#   2. linear.team.id parsed from .specify/extensions/linear-sync/linear-config.yml.
 #   3. Hard failure — without a team we cannot create team-scoped workflow
 #      states. Exit 2 with an operator-actionable hint.
 # =============================================================================
@@ -733,7 +733,7 @@ seed::reconcile_agent_labels() {
 # =============================================================================
 # Step 6 — Config write-back (T060 second half).
 #
-# Update `.specify/extensions/linear/linear-config.yml` in place. Two cases:
+# Update `.specify/extensions/linear-sync/linear-config.yml` in place. Two cases:
 #   * File exists: edit in place, preserving every field we did NOT touch.
 #     The strategy is a per-line awk script that rewrites the
 #     `linear.workflow_state_uuids` and `linear.default_state_uuids` blocks
@@ -741,7 +741,7 @@ seed::reconcile_agent_labels() {
 #     re-runs) and emits every other line verbatim.
 #   * File missing: copy `config-template.yml` into place first, then apply
 #     the same edit. This is the "fresh consumer repo, never installed"
-#     bootstrap path; downstream `speckit.linear.install` still fills in
+#     bootstrap path; downstream `speckit.linear-sync.install` still fills in
 #     team/project UUIDs separately.
 #
 # We deliberately do NOT use `yq` — keeping the dependency surface at
@@ -751,7 +751,7 @@ seed::reconcile_agent_labels() {
 
 # seed::find_template
 #   Locate the config template. Search order:
-#     1. .specify/extensions/linear/config-template.yml — the post-install
+#     1. .specify/extensions/linear-sync/config-template.yml — the post-install
 #        location (where `specify extension add linear` drops it).
 #     2. config-template.yml at the repo root — the dogfood location (this
 #        repo's own committed template).
@@ -760,7 +760,7 @@ seed::reconcile_agent_labels() {
 #   Echo the first hit, or empty on no match.
 seed::find_template() {
     local candidates=(
-        ".specify/extensions/linear/${SEED_TEMPLATE_BASENAME}"
+        ".specify/extensions/linear-sync/${SEED_TEMPLATE_BASENAME}"
         "${SEED_TEMPLATE_BASENAME}"
         "${SCRIPT_DIR}/../${SEED_TEMPLATE_BASENAME}"
     )
@@ -777,7 +777,7 @@ seed::find_template() {
 # seed::ensure_config
 #   Make sure linear-config.yml exists at SEED_CONFIG_PATH. If absent, copy
 #   from the template and surface a warning so the operator knows they need
-#   to run /spec-kit-linear-install next to fill in team + project UUIDs.
+#   to run /spec-kit-linear-sync-install next to fill in team + project UUIDs.
 seed::ensure_config() {
     if [[ -f "$SEED_CONFIG_PATH" ]]; then
         return 0
@@ -800,7 +800,7 @@ seed::ensure_config() {
 
     cp "$template" "$SEED_CONFIG_PATH"
     summary::add warned \
-        "${SEED_CONFIG_PATH} was missing; copied from ${template}. Run /spec-kit-linear-install to fill in linear.team.id and linear.project.id."
+        "${SEED_CONFIG_PATH} was missing; copied from ${template}. Run /spec-kit-linear-sync-install to fill in linear.team.id and linear.project.id."
 }
 
 # seed::render_workflow_uuid_block <indent>
@@ -848,7 +848,7 @@ seed::render_default_state_uuid_block() {
 #   block is always emitted with both keys so reconcile.sh's getter has a
 #   stable lookup target — missing labels surface as the zero placeholder
 #   UUID, which config::get_agent_label_uuid rejects with a remediation
-#   pointer back to /spec-kit-linear-seed.
+#   pointer back to /spec-kit-linear-sync-seed.
 seed::render_agent_label_uuid_block() {
     local indent="$1"
     local child_indent
@@ -898,7 +898,7 @@ seed::write_config_uuids() {
     agent_block="$(seed::render_agent_label_uuid_block "  ")"
 
     local tmp_out
-    tmp_out="$(mktemp -t spec-kit-linear-seed.XXXXXX)"
+    tmp_out="$(mktemp -t spec-kit-linear-sync-seed.XXXXXX)"
     # shellcheck disable=SC2064
     trap "rm -f '${tmp_out}'" RETURN
 

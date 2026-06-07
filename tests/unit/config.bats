@@ -273,7 +273,7 @@ EOF
     run bash -c "source '${CONFIG_SH}'; config::load '${no_agents}'; config::get_agent_label_uuid claude"
     [ "${status}" -eq 2 ]
     [[ "${output}" == *"linear.agent_label_uuids block is missing"* ]]
-    [[ "${output}" == *"spec-kit-linear-seed"* ]]
+    [[ "${output}" == *"spec-kit-linear-sync-seed"* ]]
 }
 
 @test "config::get_agent_label_uuid stays graceful when block is missing AND family is empty" {
@@ -313,7 +313,7 @@ EOF
     [[ "${output}" == *"file not found"* ]]
     [[ "${output}" == *"${missing}"* ]]
     # Operator hint must point at the install command.
-    [[ "${output}" == *"spec-kit-linear-install"* ]]
+    [[ "${output}" == *"spec-kit-linear-sync-install"* ]]
 }
 
 @test "config::load with zero arguments exits 2" {
@@ -348,7 +348,7 @@ EOF
     run bash -c "source '${CONFIG_SH}'; config::load '${broken}'; config::validate"
     [ "${status}" -eq 2 ]
     [[ "${output}" == *"linear.workflow_state_uuids.merged: missing"* ]]
-    [[ "${output}" == *"spec-kit-linear-seed"* ]]
+    [[ "${output}" == *"spec-kit-linear-sync-seed"* ]]
 }
 
 @test "config::validate flags a missing schema_version" {

@@ -3,7 +3,7 @@
 # =============================================================================
 # tests/integration/us3-pull-cross-repo.bats — T052
 #
-# User Story 3 (P2) — `speckit.linear.pull` is the cross-repo unified
+# User Story 3 (P2) — `speckit.linear-sync.pull` is the cross-repo unified
 # spec view that NEVER writes to Linear (spec.md FR-026 read-only
 # display semantics, FR-004b workspace label lookup, SC-009).
 #

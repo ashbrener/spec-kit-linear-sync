@@ -12,7 +12,7 @@
 #   THEN  the SECOND invocation issues ZERO `workflowStateCreate` and
 #         ZERO `issueLabelCreate` mutations (per-§2.1/§2.2 idempotency:
 #         pre-query → exact-match found → capture id → skip create),
-#         AND `.specify/extensions/linear/linear-config.yml` contents
+#         AND `.specify/extensions/linear-sync/linear-config.yml` contents
 #         are byte-identical between the two runs (no field churn).
 #         Exit 0. Summary emits an "already seeded" / zero-mutation
 #         line.

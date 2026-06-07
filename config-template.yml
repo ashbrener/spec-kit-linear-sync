@@ -2,14 +2,14 @@
 #
 # Role: declares everything the bridge needs to talk to one Linear
 # workspace+team+project from one consumer repo. Lives at
-# `.specify/extensions/linear/linear-config.yml` in the consumer repo.
+# `.specify/extensions/linear-sync/linear-config.yml` in the consumer repo.
 #
 # Install path: `specify extension add linear` ships THIS file into
-# `.specify/extensions/linear/config-template.yml` via copytree, but the
+# `.specify/extensions/linear-sync/config-template.yml` via copytree, but the
 # CLI does NOT auto-rename it (recon: extension-shape-recon.md §1, §5
-# Q1). Either the operator or `speckit.linear.install`'s first-run copy
+# Q1). Either the operator or `speckit.linear-sync.install`'s first-run copy
 # step renames `config-template.yml` → `linear-config.yml` and fills in
-# the UUIDs. The seed step (`speckit.linear.seed`, FR-021/FR-032) then
+# the UUIDs. The seed step (`speckit.linear-sync.seed`, FR-021/FR-032) then
 # populates `linear.workflow_state_uuids`.
 #
 # Commit status: THIS FILE IS COMMITTED (FR-002, Principle V — repo is
@@ -17,7 +17,7 @@
 # `local-config.yml` (gitignored) or env vars, never here.
 #
 # Hand-edit policy: `linear.*.id` (UUIDs) and `linear.workflow_state_uuids`
-# come from `speckit.linear.install` / `speckit.linear.seed`. Do NOT
+# come from `speckit.linear-sync.install` / `speckit.linear-sync.seed`. Do NOT
 # edit by hand unless you know what you're doing — lookups are by UUID,
 # never by name (FR-032), so a wrong UUID silently breaks sync.
 
@@ -88,18 +88,18 @@ linear:
 # Behavior toggles — operator-tweakable.
 sync:
   enabled: true              # If false, /speckit-* hooks skip Linear writes;
-                             # `speckit.linear.push` still works manually. (FR-031)
+                             # `speckit.linear-sync.push` still works manually. (FR-031)
   idle_window_days: 30       # Days before repo's Project Status flips to "Paused"
                              # if no spec touched. 0 disables. (FR-002)
   emit_summary: true         # Print structured sync summary every run (FR-023).
 
-# Webhook (Layer E) — populated by `speckit.linear.install` if opted in (FR-027).
+# Webhook (Layer E) — populated by `speckit.linear-sync.install` if opted in (FR-027).
 webhook:
   installed: false                                       # flip true when YAML is committed
   workflow_path: ".github/workflows/spec-kit-linear-sync.yml"   # (FR-027)
   secret_name: "LINEAR_API_TOKEN"                        # GitHub repo secret name (FR-029)
 
-# Local git hooks — populated by `speckit.linear.install` (FR-033).
+# Local git hooks — populated by `speckit.linear-sync.install` (FR-033).
 # `.git/hooks/` is not versioned, so install is per-clone and re-runs
 # under FR-018b's dependency-verification contract.
 git_hooks:
@@ -113,9 +113,9 @@ git_hooks:
 # How to bootstrap (first install, fresh consumer repo):
 #   1. `specify extension add linear`                 # copies this template
 #   2. `cp config-template.yml linear-config.yml`     # rename for the bridge to find it
-#   3. `/spec-kit-linear-install`                      # fills linear.{team,project}.id,
+#   3. `/spec-kit-linear-sync-install`                      # fills linear.{team,project}.id,
 #                                                     # installs webhook + git hooks,
 #                                                     # registers after_* hooks
-#   4. `/spec-kit-linear-seed`                         # creates workflow states + labels,
+#   4. `/spec-kit-linear-sync-seed`                         # creates workflow states + labels,
 #                                                     # fills workflow_state_uuids
 #   5. Commit `linear-config.yml`. Sync is now live (FR-002, Principle V).

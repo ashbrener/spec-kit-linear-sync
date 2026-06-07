@@ -10,7 +10,7 @@
 # satisfied by the committed `config-template.yml`; the resolved
 # `linear-config.yml` is local-only so a public repo never leaks the
 # operator's Linear coordinates. Bootstrap: copy the template, run install.
-.specify/extensions/linear/linear-config.yml
+.specify/extensions/linear-sync/linear-config.yml
 
 # OS detritus
 .DS_Store

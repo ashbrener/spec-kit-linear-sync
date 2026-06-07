@@ -1,5 +1,5 @@
 ---
-name: speckit.linear.install
+name: speckit.linear-sync.install
 description: Install ceremony — verify dependencies, resolve Linear Team + Project UUIDs, register after_* hooks, install local git hooks
 arguments:
   - name: project
@@ -22,7 +22,7 @@ arguments:
     optional: true
 ---
 
-# `/speckit.linear.install`
+# `/speckit.linear-sync.install`
 
 ## Summary
 
@@ -47,7 +47,7 @@ existing Project UUIDs are not overwritten without operator action.
 **Authority**: this command never mutates Linear (other than the
 optional `--auto-create` Project bootstrap, which is deferred to T077
 dogfood). Workspace seeding (workflow states, labels) is a separate
-command — `/spec-kit-linear-seed`.
+command — `/spec-kit-linear-sync-seed`.
 **Layer**: implements the install side of Layer D. The optional
 `--with-action` flag drops the Layer E template; the secret
 provisioning (`gh secret set LINEAR_API_TOKEN`) stays with the
@@ -56,7 +56,7 @@ operator per FR-029.
 The deterministic work happens in `src/install.sh`; this command is
 the AI-agent entry point that runs the shell and surfaces its output.
 The formal API contract is `contracts/command-shapes.md` §5
-(`speckit.linear.install`). Operators reading this file are looking
+(`speckit.linear-sync.install`). Operators reading this file are looking
 at the markdown the AI agent reads — the same operations are
 available via `bash src/install.sh` directly. The constitutional
 gates governing this ceremony are `.specify/memory/constitution.md`
@@ -208,7 +208,7 @@ parity with other speckit extensions.
      non-empty (the discovery flow guarantees this; the gate is a
      defense-in-depth check). `install::write_config` copies
      `config-template.yml` into
-     `.specify/extensions/linear/linear-config.yml` and substitutes
+     `.specify/extensions/linear-sync/linear-config.yml` and substitutes
      the resolved Team + Project UUIDs, the operator identity
      (FR-034 → `linear.operator.*`), and the workspace name + URL
      slug (FR-048 → `linear.workspace.*`). `workflow_state_uuids`
@@ -223,7 +223,7 @@ parity with other speckit extensions.
        the operator opts in by exporting that env var.
      - Registers each of the six `after_*` hooks under
        `.specify/extensions.yml` per FR-031 / Principle VII. Each
-       entry points at `speckit.linear.push`, with `optional: false`
+       entry points at `speckit.linear-sync.push`, with `optional: false`
        and `enabled: true`. Re-runs honour any pre-existing
        `enabled: false` operator edit (Principle VII rule 1).
      - Installs `post-checkout`, `post-commit`, `post-merge` git
@@ -244,8 +244,8 @@ parity with other speckit extensions.
        `linear-config.yml`.
      - **n / defer** — install completes; the structured summary
        carries an FR-022 warning row and the Next-steps block
-       directs the operator to `/spec-kit-linear-seed` before the
-       first `/spec-kit-linear-push`.
+       directs the operator to `/spec-kit-linear-sync-seed` before the
+       first `/spec-kit-linear-sync-push`.
      In `--non-interactive` (or `--no-prompt`) mode the install
      **halts** with the same FR-022 error rather than prompt, so CI
      never silently leaves the workspace half-installed.
@@ -291,7 +291,7 @@ parity with other speckit extensions.
 4. **Handle the exit code.** Per `contracts/command-shapes.md` §5.6:
    - `0` — install completed; all required dependencies green.
      Show the summary and direct the operator to run
-     `/spec-kit-linear-seed` next.
+     `/spec-kit-linear-sync-seed` next.
    - `1` — recoverable transient failure (e.g. Linear API blip
      during the deferred `--auto-create` Project bootstrap, when
      enabled). Re-run.
@@ -323,7 +323,7 @@ AI agent executes. When the two diverge, prefer `quickstart.md`.
   consumer repo** at adoption time. Subsequent invocations are
   idempotent (re-running just re-verifies dependencies and reports
   drift).
-- **Not auto-fired.** Unlike `/spec-kit-linear-push`, this command is
+- **Not auto-fired.** Unlike `/spec-kit-linear-sync-push`, this command is
   never wired to any `after_*` hook or git hook. It only runs when
   the operator explicitly invokes it.
 
@@ -336,7 +336,7 @@ AI agent executes. When the two diverge, prefer `quickstart.md`.
   - the next-steps pointer block
   - the final structured `summary::emit` block
 - Filesystem writes are deliberate and documented:
-  - `.specify/extensions/linear/linear-config.yml` (FR-002)
+  - `.specify/extensions/linear-sync/linear-config.yml` (FR-002)
   - `.specify/extensions.yml` (FR-031 — `after_*` hooks)
   - `.git/hooks/{post-checkout,post-commit,post-merge}` (FR-033)
   - `.mcp.json` (FR-018b — Linear MCP entry, auto-added if absent)
@@ -388,8 +388,8 @@ Selected named cases:
   `workflow_state_uuids` and the install can't ask. Fix: re-run
   without `--non-interactive`, or run `bash src/seed.sh --team
   <UUID>` first and then re-invoke install.
-- `workspace seed deferred; run /spec-kit-linear-seed before
-  /spec-kit-linear-push (FR-022)` — warning (not an error). The
+- `workspace seed deferred; run /spec-kit-linear-sync-seed before
+  /spec-kit-linear-sync-push (FR-022)` — warning (not an error). The
   operator chose `n` at the T063 prompt; install completed but
   reconcile will halt until the seed runs.
 - `github-action template missing at <path>; cannot install Layer E`
@@ -406,21 +406,21 @@ Selected named cases:
   the consumer-repo cwd, not from inside the bridge).
 - `vendored .git/ detected at <path>` — warning (FR-049). The
   install source carries a `.git/` directory at
-  `.specify/extensions/linear/.git` — typical of spec-kit-CLI
+  `.specify/extensions/linear-sync/.git` — typical of spec-kit-CLI
   `--dev` vendoring. Install proceeds; the next-steps block
   surfaces the `rm -rf <path>` remediation. The bridge never
   auto-deletes that directory (Principle VIII — operator consent).
 
 ## Related commands
 
-- `/speckit.linear.seed` — one-shot per-workspace seed of workflow
+- `/speckit.linear-sync.seed` — one-shot per-workspace seed of workflow
   states + labels. Run after install but before the first push.
-- `/speckit.linear.push` — the convergent reconcile. Runs
+- `/speckit.linear-sync.push` — the convergent reconcile. Runs
   automatically after every `/speckit-*` lifecycle command once the
   install has registered hooks.
-- `/speckit.linear.pull` — read-only inspect Linear's current view
+- `/speckit.linear-sync.pull` — read-only inspect Linear's current view
   (works from any worktree, never mutates).
-- `/speckit.linear.status` — drift report (filesystem vs Linear)
+- `/speckit.linear-sync.status` — drift report (filesystem vs Linear)
   without actually issuing mutations.
 
 See `contracts/command-shapes.md` for the formal contract on each

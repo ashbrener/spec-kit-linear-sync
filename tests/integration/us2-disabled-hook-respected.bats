@@ -10,7 +10,7 @@
 #         operator has set `enabled: false` on the `after_specify`
 #         hook in `.specify/extensions.yml`,
 #   WHEN  the after_specify hook chain is dispatched,
-#   THEN  `speckit.linear.push` does NOT fire and the operator is not
+#   THEN  `speckit.linear-sync.push` does NOT fire and the operator is not
 #         prompted.
 #   AND   re-running `src/install.sh` does NOT silently flip the hook
 #         back to `enabled: true` (FR-031 + Principle VII Rule: the

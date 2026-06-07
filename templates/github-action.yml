@@ -5,7 +5,7 @@
 # This file is the CONSUMER-SIDE workflow shipped by the `spec-kit-linear`
 # extension. It is copied verbatim into each consumer repo at
 # `.github/workflows/spec-kit-linear-sync.yml` by
-# `specify extension add linear --with-action` (or by hand if the operator
+# `specify extension add linear-sync --with-action` (or by hand if the operator
 # declined the auto-install). It is NOT the bridge's own CI workflow — the
 # bridge's CI lives at `.github/workflows/ci.yml` in the bridge repo and is
 # unrelated.
@@ -24,7 +24,7 @@
 # `closed` events where `merged == false` (drop-closed PRs) are filtered out
 # at the job level — those intentionally leave Linear at its last-known
 # state. The operator can manually move the spec Issue to `cancelled` via
-# `/spec-kit-linear-push` from a worktree if desired (that's Layer D's job).
+# `/spec-kit-linear-sync-push` from a worktree if desired (that's Layer D's job).
 #
 # WHAT IT DOES NOT DO (constitutional firebreak — Principle III)
 # --------------------------------------------------------------
@@ -41,7 +41,7 @@
 #   * Archive race-duplicate Issues (Layer D's `reconcile.sh` owns dedup).
 #   * Call the GitHub API in any form — no PR comments, no annotations,
 #     no labels on the GitHub PR, no statuses, no Issue mutations.
-#   * Touch `.specify/extensions/linear/linear-config.yml` or any other
+#   * Touch `.specify/extensions/linear-sync/linear-config.yml` or any other
 #     filesystem path under the checked-out repo.
 #
 # All of the above belong to Layer D (`src/reconcile.sh`). This Action is
@@ -75,7 +75,7 @@
 #        gh secret list -R <owner>/<repo> | grep LINEAR_API_TOKEN
 #
 # Token rotated / revoked? Re-run step 2 with the new value. No workflow
-# edit needed. Until then, Layer D's `speckit.linear.push` keeps Linear
+# edit needed. Until then, Layer D's `speckit.linear-sync.push` keeps Linear
 # converging on every reconcile (FR-030).
 #
 # IDEMPOTENCY (FR-030)
@@ -83,7 +83,7 @@
 # Linear's `issueUpdate` with the same `stateId` is a no-op when the Issue
 # is already in that state (no activity-log entry written). Re-firing on
 # the same event produces the same Linear state. Running this Action AND
-# then `/spec-kit-linear-push` from a worktree produces the same Linear
+# then `/spec-kit-linear-sync-push` from a worktree produces the same Linear
 # state. Either layer alone keeps the bridge converging.
 #
 # OBSERVABILITY (Principle VIII)
@@ -123,7 +123,7 @@ on:
 # Minimum scope possible. The Action calls ZERO GitHub APIs. The only
 # write target is Linear via LINEAR_API_TOKEN. `contents: read` is the
 # documented minimum required for `actions/checkout@v4` to clone the repo
-# so the runner can read `.specify/extensions/linear/linear-config.yml`.
+# so the runner can read `.specify/extensions/linear-sync/linear-config.yml`.
 #
 # Adding `pull-requests: write`, `issues: write`, `contents: write`, or
 # `id-token: write` to this block is a Principle III violation and a PR
@@ -158,7 +158,7 @@ jobs:
       # ---------------------------------------------------------------
       # Step 1 — Checkout
       # ---------------------------------------------------------------
-      # We need the repo's `.specify/extensions/linear/linear-config.yml`
+      # We need the repo's `.specify/extensions/linear-sync/linear-config.yml`
       # to read the Project UUID and the workflow-state UUIDs (FR-032).
       # Default fetch-depth (1) is sufficient — we only read one file at
       # the PR head commit, no history walking needed.
@@ -201,7 +201,7 @@ jobs:
           echo "Resolved feature '${FEATURE_NUMBER}' from branch '${HEAD_REF}' (label: ${SPEC_LABEL})."
 
       # ---------------------------------------------------------------
-      # Step 3 — Read .specify/extensions/linear/linear-config.yml
+      # Step 3 — Read .specify/extensions/linear-sync/linear-config.yml
       # ---------------------------------------------------------------
       # Pulls the four values the rest of the job needs:
       #   * linear.project.id                            (FR-002)
@@ -211,7 +211,7 @@ jobs:
       #
       # All four are REQUIRED by `contracts/config-schema.json`. Any
       # missing value means the operator forgot to run
-      # `/spec-kit-linear-seed` (or a stale checkout pre-dates the seed).
+      # `/spec-kit-linear-sync-seed` (or a stale checkout pre-dates the seed).
       # Fail red with the exact remediation command.
       - name: Read linear-config.yml
         id: read_config
@@ -219,7 +219,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          CFG=".specify/extensions/linear/linear-config.yml"
+          CFG=".specify/extensions/linear-sync/linear-config.yml"
 
           if [[ ! -f "$CFG" ]] || [[ ! -r "$CFG" ]]; then
             echo "::error::${CFG} is missing or unreadable on this commit."
@@ -248,12 +248,12 @@ jobs:
           fi
           if [[ -z "$STATE_READY" || "$STATE_READY" == "null" ]]; then
             echo "::error::State 'ready_to_merge' UUID missing in linear.workflow_state_uuids."
-            echo "::error::Run '/spec-kit-linear-seed' to capture workflow-state UUIDs (FR-032)."
+            echo "::error::Run '/spec-kit-linear-sync-seed' to capture workflow-state UUIDs (FR-032)."
             exit 1
           fi
           if [[ -z "$STATE_MERGED" || "$STATE_MERGED" == "null" ]]; then
             echo "::error::State 'merged' UUID missing in linear.workflow_state_uuids."
-            echo "::error::Run '/spec-kit-linear-seed' to capture workflow-state UUIDs (FR-032)."
+            echo "::error::Run '/spec-kit-linear-sync-seed' to capture workflow-state UUIDs (FR-032)."
             exit 1
           fi
 
@@ -397,7 +397,7 @@ jobs:
             # log; exit 0 so the PR check stays green (this is expected
             # for the very first PR on a brand-new spec).
             echo "::warning::No Linear Issue found for label '${SPEC_LABEL}' in project ${PROJECT_ID}."
-            echo "::warning::Layer D (speckit.linear.push) will create the Issue on the next reconcile."
+            echo "::warning::Layer D (speckit.linear-sync.push) will create the Issue on the next reconcile."
             echo "skip=true" >>"$GITHUB_OUTPUT"
             exit 0
           fi
@@ -488,7 +488,7 @@ jobs:
             # A common one: stateId points at a deleted workflow state.
             # The error body will name it ("STATE_NOT_FOUND" or similar);
             # surface the remediation command alongside.
-            echo "::error::If the error is STATE_NOT_FOUND or similar, run '/spec-kit-linear-seed --force' to recreate workflow states and update linear-config.yml."
+            echo "::error::If the error is STATE_NOT_FOUND or similar, run '/spec-kit-linear-sync-seed --force' to recreate workflow states and update linear-config.yml."
             exit 1
           fi
 
