@@ -155,3 +155,37 @@ teardown() {
     [ "${output}" = "proj-x" ]
     [ ! -s "${CALLS}" ]
 }
+
+# ---------------------------------------------------------------------------
+# link_project_to_initiative
+# ---------------------------------------------------------------------------
+
+@test "link_project_to_initiative skips (no mutation) when already nested" {
+    export Q_RESP='{"data":{"project":{"initiatives":{"nodes":[{"id":"init-1"}]}}}}'
+    export M_RESP='{}'
+    run bash -c '
+        source "${RECONCILE_SH}" 2>/dev/null
+        reconcile::log() { :; }; summary::add() { :; }
+        ARG_DRY_RUN=0
+        graphql::query() { printf "%s" "$Q_RESP"; }
+        graphql::mutate() { echo "MUTATE $1" >> "$CALLS"; printf "%s" "$M_RESP"; }
+        reconcile::link_project_to_initiative "proj-1" "init-1"
+    '
+    [ "${status}" -eq 0 ]
+    [ ! -s "${CALLS}" ]   # already linked → zero churn
+}
+
+@test "link_project_to_initiative adds the link when absent" {
+    export Q_RESP='{"data":{"project":{"initiatives":{"nodes":[]}}}}'
+    export M_RESP='{"data":{"projectUpdate":{"success":true}}}'
+    run bash -c '
+        source "${RECONCILE_SH}" 2>/dev/null
+        reconcile::log() { :; }; summary::add() { :; }
+        ARG_DRY_RUN=0
+        graphql::query() { printf "%s" "$Q_RESP"; }
+        graphql::mutate() { echo "MUTATE $2" >> "$CALLS"; printf "%s" "$M_RESP"; }
+        reconcile::link_project_to_initiative "proj-1" "init-1"
+    '
+    [ "${status}" -eq 0 ]
+    grep -q "addInitiativeIds" "${CALLS}"
+}

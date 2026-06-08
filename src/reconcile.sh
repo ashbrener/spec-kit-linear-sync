@@ -2054,6 +2054,51 @@ reconcile::ensure_project() {
     printf '%s' "$new_id"
 }
 
+# reconcile::link_project_to_initiative <project_id> <initiative_id>
+#   Idempotently nest a Project under an Initiative (the #17 spec→Project under
+#   repo→Initiative containment). Queries the Project's current initiative
+#   membership first and only mutates when the target link is absent (zero
+#   churn on re-run). Uses `projectUpdate { addInitiativeIds }` — additive, so
+#   it never disturbs any other initiative the Project belongs to. (Link shape
+#   VERIFIED — see specs/007-configurable-mapping/projection-api-notes.md.)
+reconcile::link_project_to_initiative() {
+    local project_id="$1" initiative_id="$2"
+
+    local query='query ProjInitiatives($id: String!) {
+        project(id: $id) { initiatives { nodes { id } } }
+    }'
+    local qvars response already
+    qvars="$(jq -nc --arg id "$project_id" '{id: $id}')"
+    response="$(graphql::query "$query" "$qvars")"
+    already="$(printf '%s' "$response" \
+        | jq -r --arg t "$initiative_id" \
+            '[.data.project.initiatives.nodes[]?.id] | any(. == $t)')"
+    if [[ "$already" == "true" ]]; then
+        summary::add skipped "project↔initiative link (already nested)"
+        return 0
+    fi
+
+    if (( ARG_DRY_RUN == 1 )); then
+        reconcile::log "DRY-RUN projectUpdate addInitiativeIds project=${project_id} initiative=${initiative_id}"
+        summary::add updated "project↔initiative link (dry-run)"
+        return 0
+    fi
+    local mutation='mutation LinkProjInitiative($id: String!, $input: ProjectUpdateInput!) {
+        projectUpdate(id: $id, input: $input) { success }
+    }'
+    local mvars resp
+    mvars="$(jq -nc --arg id "$project_id" --arg init "$initiative_id" \
+        '{id: $id, input: {addInitiativeIds: [$init]}}')"
+    if ! resp="$(graphql::mutate "$mutation" "$mvars")" \
+        || ! printf '%s' "$resp" | jq -e '.data.projectUpdate.success == true' >/dev/null 2>&1; then
+        summary::add error "project↔initiative link failed"
+        reconcile::promote_exit 1
+        return 1
+    fi
+    summary::add updated "project↔initiative link"
+    return 0
+}
+
 # =============================================================================
 # Per-spec orchestration.
 # =============================================================================
