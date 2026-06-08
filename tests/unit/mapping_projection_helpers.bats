@@ -76,12 +76,11 @@ teardown() {
     grep -q "initiativeCreate" "${CALLS}"
 }
 
-@test "ensure_initiative skips (no mutation) when name+description are unchanged" {
-    local marker="<!-- speckit-id: speckit-repo:r -->"
-    local desc
-    desc="$(printf 'body\n\n%s' "${marker}")"
+@test "ensure_initiative skips (no mutation) when name+description+content are unchanged" {
+    # New shape: marker lives in the short description; body lives in content.
+    local desc="<!-- speckit-id: speckit-repo:r --> — narrative super-level"
     export Q_RESP
-    Q_RESP="$(jq -nc --arg d "${desc}" '{data:{initiatives:{nodes:[{id:"init-x",name:"R",description:$d}]}}}')"
+    Q_RESP="$(jq -nc --arg d "${desc}" '{data:{initiatives:{nodes:[{id:"init-x",name:"R",description:$d,content:"body"}]}}}')"
     export M_RESP='{}'
     run bash -c '
         source "${RECONCILE_SH}" 2>/dev/null
@@ -96,24 +95,22 @@ teardown() {
     [ ! -s "${CALLS}" ]   # zero mutations — the zero-churn contract
 }
 
-@test "ensure_initiative updates when the description changed" {
-    local marker="<!-- speckit-id: speckit-repo:r -->"
-    local stale
-    stale="$(printf 'OLD body\n\n%s' "${marker}")"
+@test "ensure_initiative updates when the content changed" {
+    local desc="<!-- speckit-id: speckit-repo:r --> — narrative super-level"
     export Q_RESP
-    Q_RESP="$(jq -nc --arg d "${stale}" '{data:{initiatives:{nodes:[{id:"init-x","name":"R",description:$d}]}}}')"
+    Q_RESP="$(jq -nc --arg d "${desc}" '{data:{initiatives:{nodes:[{id:"init-x",name:"R",description:$d,content:"OLD body"}]}}}')"
     export M_RESP='{"data":{"initiativeUpdate":{"success":true}}}'
     run bash -c '
         source "${RECONCILE_SH}" 2>/dev/null
         reconcile::log() { :; }; summary::add() { :; }
         ARG_DRY_RUN=0
         graphql::query() { printf "%s" "$Q_RESP"; }
-        graphql::mutate() { echo "MUTATE $1" >> "$CALLS"; printf "%s" "$M_RESP"; }
+        graphql::mutate() { echo "MUTATE $2" >> "$CALLS"; printf "%s" "$M_RESP"; }
         reconcile::ensure_initiative "speckit-repo:r" "R" "NEW body"
     '
     [ "${status}" -eq 0 ]
     [ "${output}" = "init-x" ]
-    grep -q "initiativeUpdate" "${CALLS}"
+    grep -q "NEW body" "${CALLS}"   # the long body is written to content
 }
 
 # ---------------------------------------------------------------------------
@@ -137,11 +134,9 @@ teardown() {
 }
 
 @test "ensure_project skips (no mutation) when unchanged" {
-    local marker="<!-- speckit-id: speckit-spec:007 -->"
-    local desc
-    desc="$(printf 'body\n\n%s' "${marker}")"
+    local desc="<!-- speckit-id: speckit-spec:007 --> — read-only spec mirror"
     export Q_RESP
-    Q_RESP="$(jq -nc --arg d "${desc}" '{data:{team:{projects:{nodes:[{id:"proj-x",name:"spec-007",description:$d}]}}}}')"
+    Q_RESP="$(jq -nc --arg d "${desc}" '{data:{team:{projects:{nodes:[{id:"proj-x",name:"spec-007",description:$d,content:"body"}]}}}}')"
     export M_RESP='{}'
     run bash -c '
         source "${RECONCILE_SH}" 2>/dev/null
@@ -154,6 +149,29 @@ teardown() {
     [ "${status}" -eq 0 ]
     [ "${output}" = "proj-x" ]
     [ ! -s "${CALLS}" ]
+}
+
+@test "ensure_project create sends content (not an over-long description)" {
+    export Q_RESP='{"data":{"team":{"projects":{"nodes":[]}}}}'
+    export M_RESP='{"data":{"projectCreate":{"success":true,"project":{"id":"proj-new"}}}}'
+    # A body well over Linear's 255-char description cap must go to `content`.
+    local big; big="$(printf 'x%.0s' {1..400})"
+    export BIG="$big"
+    run bash -c '
+        source "${RECONCILE_SH}" 2>/dev/null
+        reconcile::log() { :; }; summary::add() { :; }
+        ARG_DRY_RUN=0
+        graphql::query() { printf "%s" "$Q_RESP"; }
+        graphql::mutate() { echo "$2" > "$CALLS"; printf "%s" "$M_RESP"; }
+        reconcile::ensure_project "speckit-spec:007" "spec-007" "$BIG" "team-uuid"
+    '
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "proj-new" ]
+    # description stays within the 255 cap; the 400-char body is in content.
+    desc_len="$(jq -r '.input.description | length' "${CALLS}")"
+    content_len="$(jq -r '.input.content | length' "${CALLS}")"
+    [ "${desc_len}" -le 255 ]
+    [ "${content_len}" -eq 400 ]
 }
 
 # ---------------------------------------------------------------------------
@@ -177,7 +195,7 @@ teardown() {
 
 @test "link_project_to_initiative adds the link when absent" {
     export Q_RESP='{"data":{"project":{"initiatives":{"nodes":[]}}}}'
-    export M_RESP='{"data":{"projectUpdate":{"success":true}}}'
+    export M_RESP='{"data":{"initiativeToProjectCreate":{"success":true}}}'
     run bash -c '
         source "${RECONCILE_SH}" 2>/dev/null
         reconcile::log() { :; }; summary::add() { :; }
@@ -187,7 +205,7 @@ teardown() {
         reconcile::link_project_to_initiative "proj-1" "init-1"
     '
     [ "${status}" -eq 0 ]
-    grep -q "addInitiativeIds" "${CALLS}"
+    grep -q "initiativeId" "${CALLS}"
 }
 
 # ---------------------------------------------------------------------------
