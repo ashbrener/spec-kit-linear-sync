@@ -279,3 +279,25 @@ EOF
     [ "${status}" -eq 0 ]
     [ ! -s "${CALLS}" ]   # valid-but-unimplemented combo → nothing written
 }
+
+@test "process_spec_mapped projects phase Issues + task sub-issues under the Project" {
+    _write_17_config_and_spec
+    printf '## Phase 1: Setup\n- [ ] T001 Do the thing\n' > "${SPEC_DIR}/tasks.md"
+    run bash -c '
+        source "${RECONCILE_SH}" 2>/dev/null
+        reconcile::log() { :; }; summary::add() { :; }
+        config::load "${CFG}"
+        reconcile::ensure_initiative() { printf "init-1"; }
+        reconcile::ensure_project() { printf "proj-1"; }
+        reconcile::link_project_to_initiative() { :; }
+        reconcile::render_spec_content_block() { printf "content"; }
+        reconcile::_repo_slug() { printf "my-repo"; }
+        # Stub the within-project upsert to record (label, parent) and return a
+        # deterministic id derived from the label so parent threading is visible.
+        reconcile::_mapped_ensure_issue() { echo "MEI $1 parent=${6:-}" >> "$CALLS"; printf "issue-%s" "$1"; }
+        reconcile::process_spec_mapped "${SPEC_DIR}"
+    '
+    [ "${status}" -eq 0 ]
+    grep -q "MEI task-phase:1 parent=$" "${CALLS}"                              # phase → Issue, no parent
+    grep -q "MEI speckit-task:T001 parent=issue-task-phase:1" "${CALLS}"        # task → sub-issue under the phase Issue
+}

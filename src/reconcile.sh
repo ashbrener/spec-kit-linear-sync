@@ -1363,7 +1363,11 @@ reconcile::_resolve_label_ids_array() {
     local name id allow_create
     for name in "$@"; do
         [[ -n "$name" ]] || continue
-        if [[ "$name" == speckit-spec:* || "$name" == task-phase:* ]]; then
+        if [[ "$name" == speckit-spec:* || "$name" == task-phase:* || "$name" == speckit-task:* ]]; then
+            # speckit-task:* — the task-level identity label for the #17
+            # spec-as-Project shape (task→sub-issue). Lazy-created like
+            # speckit-spec:* (neutral system-label color) so the mapped
+            # projection can mint task identity labels on first sync (spec 007).
             allow_create=1
         else
             allow_create=0
@@ -2099,6 +2103,70 @@ reconcile::link_project_to_initiative() {
     return 0
 }
 
+# reconcile::_mapped_ensure_issue <label> <project_id> <title> <description> \
+#                                 <state_uuid|""> [parent_id]
+#   Idempotently project an Issue (or sub-issue, when [parent_id] is given)
+#   identified by <label> within <project_id>. Find-or-create-or-update: queries
+#   by label+project, creates on 0 matches, and on a match writes ONLY the
+#   changed fields (title/description/state) so a re-run against unchanged disk
+#   is zero churn (FR-008). Echoes the Issue UUID. Used by the mapped #17 path
+#   for phase→Issue (no parent) and task→sub-issue (parent = the phase Issue).
+reconcile::_mapped_ensure_issue() {
+    local label="$1" project_id="$2" title="$3" description="$4" state_uuid="$5" parent_id="${6:-}"
+    local team_id
+    team_id="$(config::get_team_id)"
+
+    local label_ids
+    label_ids="$(reconcile::_resolve_label_ids_array "$label")"
+
+    local query='query FindMappedIssue($label: String!, $project: ID!) {
+        issues(filter: { labels: { name: { eq: $label } }, project: { id: { eq: $project } } }) {
+            nodes { id title description state { id } }
+        }
+    }'
+    local qvars resp existing_id
+    qvars="$(jq -nc --arg label "$label" --arg project "$project_id" '{label: $label, project: $project}')"
+    resp="$(graphql::query "$query" "$qvars")"
+    existing_id="$(printf '%s' "$resp" | jq -r '.data.issues.nodes[0].id // ""')"
+
+    if [[ -n "$existing_id" ]]; then
+        local cur_title cur_desc cur_state diff
+        cur_title="$(printf '%s' "$resp" | jq -r '.data.issues.nodes[0].title // ""')"
+        cur_desc="$(printf '%s' "$resp" | jq -r '.data.issues.nodes[0].description // ""')"
+        cur_state="$(printf '%s' "$resp" | jq -r '.data.issues.nodes[0].state.id // ""')"
+        # Build a minimal diff — only the fields that actually changed. An
+        # empty diff makes mutate_issue_update a no-op (zero churn).
+        diff="$(jq -nc \
+            --arg t "$title"        --arg ct "$cur_title" \
+            --arg d "$description"  --arg cd "$cur_desc" \
+            --arg s "$state_uuid"   --arg cs "$cur_state" '
+            {}
+            | (if $t != $ct then .title = $t else . end)
+            | (if $d != $cd then .description = $d else . end)
+            | (if ($s != "" and $s != $cs) then .stateId = $s else . end)
+        ')"
+        reconcile::mutate_issue_update "$existing_id" "$diff" || true
+        printf '%s' "$existing_id"
+        return 0
+    fi
+
+    # Create.
+    local input created new_id
+    input="$(jq -nc \
+        --arg t "$title" --arg d "$description" --arg team "$team_id" \
+        --arg proj "$project_id" --arg state "$state_uuid" \
+        --argjson labels "$label_ids" --arg parent "$parent_id" '
+        ( { title: $t, description: $d, teamId: $team, projectId: $proj, labelIds: $labels }
+          + (if $state  != "" then { stateId:  $state  } else {} end)
+          + (if $parent != "" then { parentId: $parent } else {} end) )
+    ')"
+    if ! created="$(reconcile::mutate_issue_create "$input")"; then
+        return 1
+    fi
+    new_id="$(printf '%s' "$created" | jq -r '.id // ""')"
+    printf '%s' "$new_id"
+}
+
 # reconcile::_repo_slug
 #   Echo a stable, filesystem-derived repo slug for the repo-level identity
 #   marker (the git toplevel basename, falling back to PWD). Never minted from
@@ -2175,11 +2243,47 @@ reconcile::process_spec_mapped() {
         reconcile::link_project_to_initiative "$project_id" "$initiative_id" || true
     fi
 
-    # phase → Issue / task → sub-issue projection + the mapped-path drift anchor
-    # land in the next sub-increment. Loud notice so the partial mirror is never
-    # mistaken for a complete one (Principle VIII).
-    summary::add warned "spec ${feature_number}: #17 containers projected (Initiative + Project); phase→Issue / task→sub-issue projection + drift anchor land in the next increment"
-    reconcile::log "spec ${feature_number}: mapped #17 container projection complete (project=${project_id})"
+    # phase → Issue (under the spec Project) and task → sub-issue (under the
+    # phase Issue), idempotently keyed by their identity labels within the
+    # Project. The phase Issue's state rolls up from its tasks' completion
+    # (reused subissue_state_key); each task sub-issue's state is todo/done by
+    # its own checkbox. State UUIDs are resolved best-effort — a config without
+    # default_state_uuids still projects the hierarchy (issue takes the team
+    # default state) rather than halting.
+    local tasks_md="${spec_dir%/}/tasks.md"
+    local idx name
+    while IFS=$'\t' read -r idx name; do
+        [[ -n "$idx" ]] || continue
+        local phase_state_key phase_state_uuid phase_issue_id
+        phase_state_key="$(reconcile::subissue_state_key "$tasks_md" "$idx")"
+        phase_state_uuid="$(config::get_default_state_uuid "$phase_state_key" 2>/dev/null)" || phase_state_uuid=""
+        phase_issue_id="$(reconcile::_mapped_ensure_issue \
+            "task-phase:${idx}" "$project_id" \
+            "Phase ${idx} — ${name}" \
+            "Phase ${idx}: ${name} — read-only mirror of tasks.md (spec ${feature_number})." \
+            "$phase_state_uuid" "")"
+        [[ -n "$phase_issue_id" && "$phase_issue_id" != "null" ]] || continue
+
+        local tid tstate tdesc test task_state_uuid
+        while IFS=$'\t' read -r tid tstate tdesc test; do
+            : "${test:-}"
+            [[ -n "$tid" ]] || continue
+            if [[ "$tstate" == "checked" ]]; then
+                task_state_uuid="$(config::get_default_state_uuid "done" 2>/dev/null)" || task_state_uuid=""
+            else
+                task_state_uuid="$(config::get_default_state_uuid "todo" 2>/dev/null)" || task_state_uuid=""
+            fi
+            reconcile::_mapped_ensure_issue \
+                "speckit-task:${tid}" "$project_id" \
+                "${tid} ${tdesc}" "$tdesc" \
+                "$task_state_uuid" "$phase_issue_id" >/dev/null || true
+        done < <(parser::tasks_in_phase "$tasks_md" "$idx")
+    done < <(parser::task_phases "$tasks_md")
+
+    # The mapped-path backward-drift anchor (recency on the spec Project,
+    # FR-010) is the final sub-increment; surface that it is not yet active.
+    summary::add warned "spec ${feature_number}: #17 mapping projected (Initiative → Project → Issue → sub-issue); the mapped-path backward-drift anchor lands in the next increment"
+    reconcile::log "spec ${feature_number}: mapped #17 projection complete (project=${project_id})"
     return 0
 }
 
