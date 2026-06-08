@@ -53,7 +53,8 @@
 # -----------------------------------------------------------------------------
 # CLI surface (per contracts/command-shapes.md §4)
 # -----------------------------------------------------------------------------
-#   src/seed.sh [--team UUID] [--dry-run] [--workspace-only] [--help]
+#   src/seed.sh [--team UUID] [--scope workspace|team] [--dry-run]
+#               [--workspace-only] [--help]
 #
 # Exit codes (matching the rest of the bridge):
 #   0  success (possibly with warnings)
@@ -103,7 +104,20 @@ readonly SEED_TEMPLATE_BASENAME="config-template.yml"
 declare -g ARG_TEAM_OVERRIDE=""        # UUID or empty
 declare -g ARG_DRY_RUN=0               # 0|1
 declare -g ARG_WORKSPACE_ONLY=0        # 0|1 — skip the config.yml write
+declare -g ARG_SEED_SCOPE=""           # workspace|team|"" (unset → resolve)
 declare -g SEED_CONFIG_PATH=""         # populated after parse_args
+
+# Resolved seed scope (spec 005, FR-005). Populated by seed::resolve_scope
+# in main(); one of `workspace` or `team`. In `team` scope label creation
+# passes teamId so a sub-team owner can seed without workspace-admin.
+declare -g SEED_SCOPE="team"
+
+# Could-not-provision tracker (spec 005, FR-011). Names of PERSISTED
+# resources (workflow states / default states / agent labels) that could
+# be neither created (no permission) nor adopted (not present). Surfaced
+# as a single actionable listing at end-of-run so an admin knows exactly
+# what to provision once. Keyed by a human label; value is unused.
+declare -gA SEED_UNRESOLVED=()
 
 # Aggregate exit-code tracker — monotonic promotion to higher severities.
 declare -g SEED_EXIT_CODE=0
@@ -214,15 +228,26 @@ declare -gA SEED_LABEL_UUIDS=()            # label_name → UUID (diagnostics)
 # -----------------------------------------------------------------------------
 seed::usage() {
     cat >&2 <<'EOF'
-Usage: seed.sh [--team UUID] [--dry-run] [--workspace-only] [--help]
+Usage: seed.sh [--team UUID] [--scope workspace|team] [--dry-run]
+               [--workspace-only] [--help]
 
-One-shot Linear workspace seed. Creates the 9 custom lifecycle workflow
-states + 18 workspace labels the bridge relies on, captures every UUID,
-and writes them back into .specify/extensions/linear/linear-config.yml.
+One-shot Linear seed. Creates the 9 custom lifecycle workflow states +
+the bridge's labels, captures every UUID, and writes them back into
+.specify/extensions/linear/linear-config.yml.
+
+A non-admin / sub-team owner can seed in `team` scope (the default):
+labels are created scoped to the team (not workspace-wide), so no
+workspace-admin permission is required. When a create is not permitted,
+seed auto-falls-back to ADOPTING an already-existing state/label by name
+and capturing its UUID — requiring zero create permission.
 
 Options:
   --team UUID       Override the team UUID. Default: read from
                     linear-config.yml's linear.team.id.
+  --scope SCOPE     Seed scope: `workspace` (workspace-wide labels,
+                    requires workspace-admin) or `team` (labels scoped to
+                    the team, requires only team-level permission).
+                    Default: linear.seed.scope from config, else `team`.
   --dry-run         Log every mutation that WOULD fire; issue none. No
                     config.yml write.
   --workspace-only  Run the workspace mutations only — do NOT write the
@@ -299,6 +324,19 @@ seed::parse_args() {
                 ARG_WORKSPACE_ONLY=1
                 shift
                 ;;
+            --scope)
+                if (( $# < 2 )); then
+                    printf 'spec-kit-linear: --scope requires an argument (workspace|team)\n' >&2
+                    seed::usage
+                    exit 2
+                fi
+                ARG_SEED_SCOPE="$2"
+                shift 2
+                ;;
+            --scope=*)
+                ARG_SEED_SCOPE="${1#--scope=}"
+                shift
+                ;;
             --config)
                 if (( $# < 2 )); then
                     printf 'spec-kit-linear: --config requires a path argument\n' >&2
@@ -356,6 +394,67 @@ seed::resolve_team_uuid() {
 }
 
 # =============================================================================
+# Step 2b — Seed scope resolution (spec 005, FR-005 / FR-006).
+#
+# Precedence:
+#   1. --scope flag on the CLI (operator override / non-interactive
+#      install).
+#   2. linear.seed.scope from config (config::get_seed_scope), which itself
+#      defaults to `team` when the block is absent (FR-013).
+#   3. The hardcoded default `team`.
+# An invalid --scope value halts (exit 2) with an actionable hint — we do
+# NOT silently coerce (Principle VIII).
+# =============================================================================
+seed::resolve_scope() {
+    if [[ -n "$ARG_SEED_SCOPE" ]]; then
+        case "$ARG_SEED_SCOPE" in
+            workspace|team)
+                printf '%s\n' "$ARG_SEED_SCOPE"
+                return 0
+                ;;
+            *)
+                summary::add error "invalid --scope value '${ARG_SEED_SCOPE}' (valid: workspace, team)"
+                seed::promote_exit 2
+                return 2
+                ;;
+        esac
+    fi
+
+    # config may not be loaded (e.g. --team override with no config file);
+    # fall back to the default in that case rather than halting.
+    if [[ -n "${CONFIG_LOADED_PATH:-}" ]]; then
+        config::get_seed_scope
+        return 0
+    fi
+    printf 'team\n'
+}
+
+# =============================================================================
+# Step 2c — Actionable permission/limit hint (spec 005, FR-004 / SC-003).
+#
+# seed::permission_hint <resource> <kind> [scope]
+#   Surface a single, clear, actionable message when a create call fails
+#   with a permission or limit error. It names the resource and the
+#   failure kind, and points the operator at the adopt-existing path and
+#   the team-scoped option — never a cryptic raw API error.
+# =============================================================================
+seed::permission_hint() {
+    local resource="$1"
+    local kind="$2"          # permission | limit
+    local scope="${3:-$SEED_SCOPE}"
+
+    local next
+    if [[ "$scope" == "workspace" ]]; then
+        next="re-run with --scope team (creates this resource scoped to your team, needing only team-level permission), or have an admin create it once — a later seed will ADOPT the existing resource without needing create permission."
+    else
+        next="have an admin (or a previous seed run) create this resource once — a later seed will ADOPT the existing resource by name without needing create permission."
+    fi
+
+    summary::add error \
+        "create of '${resource}' failed (${kind} error in ${scope} scope). ${next}"
+}
+
+# =============================================================================
 # Step 3 — Workflow-state idempotency probe + create (T058 + T060).
 #
 # Per contracts §2.1: before each workflowStateCreate, query
@@ -406,10 +505,22 @@ seed::query_workflow_state() {
     esac
 }
 
+# Sentinel return code (spec 005): a create call was DENIED by a
+# permission or limit error. Distinct from 0 (created) and 1 (fail-closed
+# transport/graphql) so the caller can route to the adopt fallback
+# (FR-006) rather than aborting (FR-014). 10 is well clear of the
+# bridge's 0..3 exit-code space.
+readonly SEED_RC_DENIED=10
+
 # seed::create_workflow_state <team_uuid> <name> <type> <color> <position>
-#   Issue a workflowStateCreate mutation and echo the resulting UUID. On
-#   --dry-run, log + return a synthetic placeholder ID so the caller's flow
-#   continues end-to-end (mirrors the reconcile.sh dry-run convention).
+#   Issue a workflowStateCreate mutation and echo the resulting UUID.
+#   Returns:
+#     0               created; UUID on stdout
+#     SEED_RC_DENIED  permission/limit error (caller falls back to adopt)
+#     1               fail-closed (transport / graphql error)
+#   On --dry-run, log + return a synthetic placeholder ID so the caller's
+#   flow continues end-to-end (mirrors the reconcile.sh dry-run
+#   convention).
 seed::create_workflow_state() {
     local team_uuid="$1"
     local name="$2"
@@ -451,19 +562,37 @@ seed::create_workflow_state() {
         }')"
     vars="$(jq -nc --argjson input "$input_json" '{input: $input}')"
 
-    local response
-    if ! response="$(graphql::mutate "$mutation" "$vars")"; then
-        summary::add error "workflowStateCreate ${name} failed (transport)"
-        seed::promote_exit 1
-        return 1
-    fi
-    if ! printf '%s' "$response" | jq -e '.data.workflowStateCreate.success == true' >/dev/null 2>&1; then
-        summary::add error "workflowStateCreate ${name} did not return success=true"
-        seed::promote_exit 1
-        return 1
-    fi
-    summary::add created "workflowStateCreate ${name}"
-    printf '%s\n' "$(printf '%s' "$response" | jq -r '.data.workflowStateCreate.workflowState.id')"
+    # Non-fatal capture so a permission/limit denial routes to adopt
+    # rather than killing the run (FR-004 / FR-006).
+    local envelope class
+    envelope="$(graphql::mutate_capture "$mutation" "$vars")"
+    class="$(printf '%s' "$envelope" | jq -r '.class // "transport"')"
+
+    case "$class" in
+        ok)
+            local response
+            response="$(printf '%s' "$envelope" | jq -c '.response')"
+            if ! printf '%s' "$response" | jq -e '.data.workflowStateCreate.success == true' >/dev/null 2>&1; then
+                summary::add error "workflowStateCreate ${name} did not return success=true"
+                seed::promote_exit 1
+                return 1
+            fi
+            summary::add created "workflowStateCreate ${name}"
+            printf '%s\n' "$(printf '%s' "$response" | jq -r '.data.workflowStateCreate.workflowState.id')"
+            return 0
+            ;;
+        permission|limit)
+            seed::permission_hint "workflow state '${name}'" "$class"
+            return "$SEED_RC_DENIED"
+            ;;
+        *)
+            local msg
+            msg="$(printf '%s' "$envelope" | jq -r '.message // "transport error"')"
+            summary::add error "workflowStateCreate ${name} failed (${class}): ${msg}"
+            seed::promote_exit 1
+            return 1
+            ;;
+    esac
 }
 
 # seed::reconcile_workflow_states <team_uuid>
@@ -471,26 +600,44 @@ seed::create_workflow_state() {
 #   if absent → capture UUID into SEED_WORKFLOW_UUIDS keyed by lifecycle_key.
 seed::reconcile_workflow_states() {
     local team_uuid="$1"
-    local row key name type color position uuid
+    local row key name type color position uuid rc
     for row in "${SEED_WORKFLOW_STATES[@]}"; do
         # Tab-separated parse — IFS scoped to the read so the surrounding
         # shell environment stays untouched.
         IFS=$'\t' read -r key name type color position <<<"$row"
 
+        # The find-by-name probe runs first and is the basis of BOTH the
+        # idempotent re-seed AND the adopt-existing path (FR-002, FR-003).
+        # A multi-match returns empty (warn + skip per FR-010), so we never
+        # capture an arbitrary UUID here.
         uuid="$(seed::query_workflow_state "$team_uuid" "$name")"
         if [[ -n "$uuid" ]]; then
-            seed::log "workflow state '${name}' already exists (${uuid}); skipping create"
-            summary::add skipped "workflow state '${name}' already present"
+            seed::log "workflow state '${name}' adopted (${uuid}); no create needed"
+            summary::add skipped "workflow state '${name}' adopted (existing)"
             SEED_WORKFLOW_UUIDS[$key]="$uuid"
             continue
         fi
 
-        if ! uuid="$(seed::create_workflow_state "$team_uuid" "$name" "$type" "$color" "$position")"; then
-            # create_workflow_state already aggregated the error; just move on.
+        rc=0
+        uuid="$(seed::create_workflow_state "$team_uuid" "$name" "$type" "$color" "$position")" || rc=$?
+        if (( rc == 0 )); then
+            seed::log "created workflow state '${name}' → ${uuid}"
+            SEED_WORKFLOW_UUIDS[$key]="$uuid"
             continue
         fi
-        seed::log "created workflow state '${name}' → ${uuid}"
-        SEED_WORKFLOW_UUIDS[$key]="$uuid"
+
+        if (( rc == SEED_RC_DENIED )); then
+            # Create not permitted — auto-fall-back to adopt (FR-006). The
+            # probe above already came back empty, so the resource is
+            # genuinely absent: it can be neither created nor adopted.
+            # Record it for the could-not-provision listing (FR-011).
+            SEED_UNRESOLVED["workflow state '${name}'"]=1
+            seed::promote_exit 1
+            continue
+        fi
+
+        # Fail-closed (transport/graphql) — create_workflow_state already
+        # aggregated the error and promoted the exit code; move on.
     done
 }
 
@@ -566,6 +713,10 @@ seed::capture_default_states() {
         fi
 
         if [[ -z "$uuid" ]]; then
+            # Default states are stock Linear team states that seed CAPTURES
+            # but never creates — they are outside the create/adopt FR-011
+            # provisioning loop. A missing one keeps its established
+            # warn-only handling (pre-005 contract): surfaced, non-blocking.
             summary::add warned \
                 "default state '${key}' (expected '${expected_name}', type ${expected_type}) not found on team ${team_uuid}; task-phase sub-issues will fail until this state exists"
             continue
@@ -615,21 +766,37 @@ seed::query_label() {
     esac
 }
 
-# seed::create_label <name> [color]
-#   Issue an `issueLabelCreate` GraphQL mutation. Workspace-scoped (no team).
+# seed::create_label <name> [color] [scope] [team_uuid]
+#   Issue an `issueLabelCreate` GraphQL mutation.
+#     * scope=team (spec 005, FR-001) — pass `teamId` so the label is
+#       created scoped to the team; needs only team-level permission so a
+#       sub-team owner can seed without workspace-admin.
+#     * scope=workspace (default, FR-013) — omit `teamId`; workspace-scoped
+#       exactly as the pre-005 behaviour.
 #   If <color> is omitted, Linear assigns a sensible default; pass a hex
 #   color (e.g. `#14B8A6`) to lock the visual treatment for system label
 #   families that need to be visually distinguishable (FR-036's agent:*).
 #   Recolour in Linear's UI is non-fatal — lookups are by UUID (Principle V).
+#   Returns:
+#     0               created; UUID on stdout
+#     SEED_RC_DENIED  permission/limit error (caller falls back to adopt)
+#     1               fail-closed (transport / graphql error)
 seed::create_label() {
     local name="$1"
     local color="${2:-}"
+    local scope="${3:-$SEED_SCOPE}"
+    local team_uuid="${4:-}"
+
+    local scope_desc="workspace-scoped"
+    if [[ "$scope" == "team" && -n "$team_uuid" ]]; then
+        scope_desc="team-scoped (team ${team_uuid})"
+    fi
 
     if (( ARG_DRY_RUN == 1 )); then
         if [[ -n "$color" ]]; then
-            seed::log "DRY-RUN issueLabelCreate name='${name}' color='${color}' (workspace-scoped)"
+            seed::log "DRY-RUN issueLabelCreate name='${name}' color='${color}' (${scope_desc})"
         else
-            seed::log "DRY-RUN issueLabelCreate name='${name}' (workspace-scoped)"
+            seed::log "DRY-RUN issueLabelCreate name='${name}' (${scope_desc})"
         fi
         summary::add created "issueLabelCreate ${name} (dry-run)"
         printf '00000000-0000-0000-0000-000000000000\n'
@@ -643,28 +810,46 @@ seed::create_label() {
         }
     }'
     local input_json vars
-    # No teamId → workspace-scoped per Linear's IssueLabelCreateInput contract.
+    # Build the IssueLabelCreateInput, adding teamId only in team scope
+    # (FR-001). Workspace scope omits it → workspace-scoped label (FR-013).
+    input_json="$(jq -nc --arg name "$name" '{name: $name}')"
     if [[ -n "$color" ]]; then
-        input_json="$(jq -nc --arg name "$name" --arg color "$color" \
-            '{name: $name, color: $color}')"
-    else
-        input_json="$(jq -nc --arg name "$name" '{name: $name}')"
+        input_json="$(printf '%s' "$input_json" | jq -c --arg color "$color" '.color = $color')"
+    fi
+    if [[ "$scope" == "team" && -n "$team_uuid" ]]; then
+        input_json="$(printf '%s' "$input_json" | jq -c --arg team "$team_uuid" '.teamId = $team')"
     fi
     vars="$(jq -nc --argjson input "$input_json" '{input: $input}')"
 
-    local response
-    if ! response="$(graphql::mutate "$mutation" "$vars")"; then
-        summary::add error "issueLabelCreate ${name} failed (transport)"
-        seed::promote_exit 1
-        return 1
-    fi
-    if ! printf '%s' "$response" | jq -e '.data.issueLabelCreate.success == true' >/dev/null 2>&1; then
-        summary::add error "issueLabelCreate ${name} did not return success=true"
-        seed::promote_exit 1
-        return 1
-    fi
-    summary::add created "issueLabelCreate ${name}"
-    printf '%s\n' "$(printf '%s' "$response" | jq -r '.data.issueLabelCreate.issueLabel.id')"
+    local envelope class
+    envelope="$(graphql::mutate_capture "$mutation" "$vars")"
+    class="$(printf '%s' "$envelope" | jq -r '.class // "transport"')"
+
+    case "$class" in
+        ok)
+            local response
+            response="$(printf '%s' "$envelope" | jq -c '.response')"
+            if ! printf '%s' "$response" | jq -e '.data.issueLabelCreate.success == true' >/dev/null 2>&1; then
+                summary::add error "issueLabelCreate ${name} did not return success=true"
+                seed::promote_exit 1
+                return 1
+            fi
+            summary::add created "issueLabelCreate ${name} (${scope_desc})"
+            printf '%s\n' "$(printf '%s' "$response" | jq -r '.data.issueLabelCreate.issueLabel.id')"
+            return 0
+            ;;
+        permission|limit)
+            seed::permission_hint "label '${name}'" "$class" "$scope"
+            return "$SEED_RC_DENIED"
+            ;;
+        *)
+            local msg
+            msg="$(printf '%s' "$envelope" | jq -r '.message // "transport error"')"
+            summary::add error "issueLabelCreate ${name} failed (${class}): ${msg}"
+            seed::promote_exit 1
+            return 1
+            ;;
+    esac
 }
 
 # seed::reconcile_labels
@@ -672,8 +857,13 @@ seed::create_label() {
 #   each. Captured UUIDs go into SEED_LABEL_UUIDS for diagnostics. Unlike the
 #   workflow-state UUIDs these are NOT written to linear-config.yml — label
 #   lookups inside reconcile.sh are by name (workspace-scoped, stable).
+#   <team_uuid> is forwarded to create_label so team scope (FR-001) can
+#   attach teamId. The phase / task-phase label UUIDs are diagnostics-only
+#   (reconcile looks them up by name), so a denied-and-unadoptable label in
+#   this family is NOT a could-not-provision blocker — but it IS reported.
 seed::reconcile_labels() {
-    local name uuid
+    local team_uuid="${1:-}"
+    local name uuid rc
     local -a all_labels=()
     all_labels+=("${SEED_PHASE_LABELS[@]}")
     all_labels+=("${SEED_TASK_PHASE_LABELS[@]}")
@@ -681,19 +871,30 @@ seed::reconcile_labels() {
     for name in "${all_labels[@]}"; do
         uuid="$(seed::query_label "$name")"
         if [[ -n "$uuid" ]]; then
-            seed::log "label '${name}' already exists (${uuid}); skipping create"
-            summary::add skipped "label '${name}' already present"
+            seed::log "label '${name}' adopted (${uuid}); no create needed"
+            summary::add skipped "label '${name}' adopted (existing)"
             # shellcheck disable=SC2034  # diagnostics-only buffer
             SEED_LABEL_UUIDS[$name]="$uuid"
             continue
         fi
 
-        if ! uuid="$(seed::create_label "$name")"; then
+        rc=0
+        uuid="$(seed::create_label "$name" "" "$SEED_SCOPE" "$team_uuid")" || rc=$?
+        if (( rc == 0 )); then
+            seed::log "created label '${name}' → ${uuid}"
+            # shellcheck disable=SC2034  # diagnostics-only buffer
+            SEED_LABEL_UUIDS[$name]="$uuid"
             continue
         fi
-        seed::log "created label '${name}' → ${uuid}"
-        # shellcheck disable=SC2034  # diagnostics-only buffer
-        SEED_LABEL_UUIDS[$name]="$uuid"
+        if (( rc == SEED_RC_DENIED )); then
+            # Create denied and the probe found nothing to adopt. These
+            # labels are looked up by name (not persisted to config), so we
+            # surface a warning but do not block the run on them.
+            summary::add warned "label '${name}' could not be created (denied) and does not yet exist to adopt"
+            seed::promote_exit 1
+            continue
+        fi
+        # fail-closed already aggregated by create_label.
     done
 }
 
@@ -706,27 +907,39 @@ seed::reconcile_labels() {
 #   lookup. A teal color is forced on create so the family is visually
 #   distinct in Linear's UI; existing labels' colors are left untouched.
 seed::reconcile_agent_labels() {
-    local row family name uuid
+    local team_uuid="${1:-}"
+    local row family name uuid rc
     for row in "${SEED_AGENT_LABELS[@]}"; do
         IFS=$'\t' read -r family name <<<"$row"
 
         uuid="$(seed::query_label "$name")"
         if [[ -n "$uuid" ]]; then
-            seed::log "agent label '${name}' already exists (${uuid}); skipping create"
-            summary::add skipped "label '${name}' already present"
+            seed::log "agent label '${name}' adopted (${uuid}); no create needed"
+            summary::add skipped "label '${name}' adopted (existing)"
             # shellcheck disable=SC2034  # diagnostics-only buffer
             SEED_LABEL_UUIDS[$name]="$uuid"
             SEED_AGENT_LABEL_UUIDS[$family]="$uuid"
             continue
         fi
 
-        if ! uuid="$(seed::create_label "$name" "$SEED_AGENT_LABEL_COLOR")"; then
+        rc=0
+        uuid="$(seed::create_label "$name" "$SEED_AGENT_LABEL_COLOR" "$SEED_SCOPE" "$team_uuid")" || rc=$?
+        if (( rc == 0 )); then
+            seed::log "created agent label '${name}' → ${uuid}"
+            # shellcheck disable=SC2034  # diagnostics-only buffer
+            SEED_LABEL_UUIDS[$name]="$uuid"
+            SEED_AGENT_LABEL_UUIDS[$family]="$uuid"
             continue
         fi
-        seed::log "created agent label '${name}' → ${uuid}"
-        # shellcheck disable=SC2034  # diagnostics-only buffer
-        SEED_LABEL_UUIDS[$name]="$uuid"
-        SEED_AGENT_LABEL_UUIDS[$family]="$uuid"
+        if (( rc == SEED_RC_DENIED )); then
+            # Agent-label UUIDs ARE persisted to config, so a denied +
+            # unadoptable agent label is a could-not-provision blocker
+            # (FR-011) — reconcile depends on it for the agent:* stamp.
+            SEED_UNRESOLVED["agent label '${name}'"]=1
+            seed::promote_exit 1
+            continue
+        fi
+        # fail-closed already aggregated by create_label.
     done
 }
 
@@ -1055,6 +1268,28 @@ seed::write_config_uuids() {
 }
 
 # =============================================================================
+# Step 6b — Could-not-provision listing (spec 005, FR-011).
+#
+# When required PERSISTED resources (workflow states, default states,
+# agent labels) could be neither created (no permission) nor adopted (not
+# present), emit a single clear, actionable message listing every such
+# resource by name so an admin knows exactly what to provision once — not
+# a cryptic failure. Promotes the exit code so callers/CI observe the gap.
+# =============================================================================
+seed::report_unresolved() {
+    if (( ${#SEED_UNRESOLVED[@]} == 0 )); then
+        return 0
+    fi
+
+    local names
+    names="$(printf '%s; ' "${!SEED_UNRESOLVED[@]}")"
+    names="${names%; }"
+    summary::add error \
+        "${#SEED_UNRESOLVED[@]} required resource(s) could be neither created (no permission) nor adopted (not present): ${names}. Have an admin create them once, or re-run with --scope team; a later seed will adopt them."
+    seed::promote_exit 1
+}
+
+# =============================================================================
 # Step 7 — Main orchestration.
 # =============================================================================
 main() {
@@ -1069,6 +1304,16 @@ main() {
         exit "$SEED_EXIT_CODE"
     fi
     seed::log "team UUID: ${team_uuid}"
+
+    # Resolve the seed scope (spec 005, FR-005): --scope flag → config →
+    # default `team`. In team scope labels are created scoped to the team so
+    # a non-admin sub-team owner can seed (FR-001).
+    if ! SEED_SCOPE="$(seed::resolve_scope)"; then
+        summary::emit
+        exit "$SEED_EXIT_CODE"
+    fi
+    seed::log "seed scope: ${SEED_SCOPE}"
+
     if (( ARG_DRY_RUN == 1 )); then
         seed::log "DRY-RUN MODE: no Linear mutations will be issued; no config write"
     fi
@@ -1076,22 +1321,31 @@ main() {
         seed::log "--workspace-only: linear-config.yml will NOT be written"
     fi
 
-    # T058: workflow states (9).
+    # T058: workflow states (9). States always take a team; existing states
+    # are ADOPTED by name (FR-002, FR-003); create-denied auto-falls-back
+    # to adopt (FR-006).
     seed::reconcile_workflow_states "$team_uuid"
 
     # Default-state capture (FR-005 / contracts §4.3) — Todo / In Progress /
     # Done UUIDs into SEED_DEFAULT_STATE_UUIDS.
     seed::capture_default_states "$team_uuid"
 
-    # T059: labels (9 phase:* + 9 task-phase:N = 18 total).
-    seed::reconcile_labels
+    # T059: labels (9 phase:* + 9 task-phase:N = 18 total). Scope-aware:
+    # team scope passes teamId (FR-001); workspace scope omits it (FR-013).
+    # Existing labels are ADOPTED by name.
+    seed::reconcile_labels "$team_uuid"
 
     # FR-036: agent provenance labels (agent:claude, agent:codex). Captured
     # UUIDs land in SEED_AGENT_LABEL_UUIDS and are written into
     # linear-config.yml.linear.agent_label_uuids by the splicer below so
     # reconcile.sh's _resolve_agent_label_id helper can map the running
     # agent's family name to its label UUID without a per-Issue name lookup.
-    seed::reconcile_agent_labels
+    seed::reconcile_agent_labels "$team_uuid"
+
+    # FR-011: if any PERSISTED resource could be neither created nor
+    # adopted, surface a single clear listing so an admin knows exactly
+    # what to provision once — never a cryptic failure.
+    seed::report_unresolved
 
     # T060 (write-back half): splice captured UUIDs into linear-config.yml.
     seed::write_config_uuids

@@ -335,3 +335,97 @@ ENV
     # transport layer.
     [ "$(_call_count)" -eq 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# graphql::mutate_capture — non-fatal classified mutate (spec 005, FR-004).
+# Always returns 0; emits a JSON envelope { ok, class, response?, message? }.
+# ---------------------------------------------------------------------------
+
+@test "mutate_capture: clean 200 → ok with the response echoed (non-fatal)" {
+    _setup_mock_curl
+    _stage_response 1 '{"data":{"issueLabelCreate":{"success":true,"issueLabel":{"id":"lbl-1"}}}}' 200
+    export LINEAR_API_KEY="lin_api_fake_capture_ok"
+
+    _source_graphql
+    run graphql::mutate_capture \
+        'mutation($input: IssueLabelCreateInput!) { issueLabelCreate(input: $input) { success } }' \
+        '{"input":{"name":"phase:specifying"}}'
+
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s' "$output" | jq -r '.ok')" = "true" ]
+    [ "$(printf '%s' "$output" | jq -r '.class')" = "ok" ]
+    [ "$(printf '%s' "$output" | jq -r '.response.data.issueLabelCreate.issueLabel.id')" = "lbl-1" ]
+}
+
+@test "mutate_capture: HTTP 403 → class=permission, non-fatal (returns 0)" {
+    _setup_mock_curl
+    _stage_response 1 '{"errors":[{"message":"You do not have permission"}]}' 403
+    export LINEAR_API_KEY="lin_api_fake_capture_403"
+
+    _source_graphql
+    run graphql::mutate_capture 'mutation { __typename }' '{}'
+
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s' "$output" | jq -r '.ok')" = "false" ]
+    [ "$(printf '%s' "$output" | jq -r '.class')" = "permission" ]
+}
+
+@test "mutate_capture: 200 with a forbidden errors[] → class=permission" {
+    _setup_mock_curl
+    _stage_response 1 '{"errors":[{"message":"Access denied: admin required","extensions":{"code":"FORBIDDEN"}}]}' 200
+    export LINEAR_API_KEY="lin_api_fake_capture_forbidden"
+
+    _source_graphql
+    run graphql::mutate_capture 'mutation { __typename }' '{}'
+
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s' "$output" | jq -r '.class')" = "permission" ]
+}
+
+@test "mutate_capture: HTTP 429 → class=limit" {
+    _setup_mock_curl
+    _stage_response 1 '{"errors":[{"message":"Rate limit exceeded"}]}' 429
+    export LINEAR_API_KEY="lin_api_fake_capture_429"
+
+    _source_graphql
+    run graphql::mutate_capture 'mutation { __typename }' '{}'
+
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s' "$output" | jq -r '.class')" = "limit" ]
+}
+
+@test "mutate_capture: 200 with a non-permission/limit errors[] → class=graphql" {
+    _setup_mock_curl
+    _stage_response 1 '{"errors":[{"message":"Variable $x of type String! was not provided"}]}' 200
+    export LINEAR_API_KEY="lin_api_fake_capture_gql"
+
+    _source_graphql
+    run graphql::mutate_capture 'mutation { __typename }' '{}'
+
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s' "$output" | jq -r '.class')" = "graphql" ]
+}
+
+@test "mutate_capture: HTTP 500 after retry → class=transport, non-fatal" {
+    _setup_mock_curl
+    _stage_response 1 '{"errors":[{"message":"server error"}]}' 500
+    export LINEAR_API_KEY="lin_api_fake_capture_500"
+
+    _source_graphql
+    run graphql::mutate_capture 'mutation { __typename }' '{}'
+
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s' "$output" | jq -r '.class')" = "transport" ]
+}
+
+@test "mutate_capture: curl transport failure → class=transport, non-fatal" {
+    _setup_mock_curl
+    printf '7' > "${MOCK_STATE}/fail-call-1"
+    export LINEAR_API_KEY="lin_api_fake_capture_curlfail"
+
+    _source_graphql
+    run graphql::mutate_capture 'mutation { __typename }' '{}'
+
+    [ "$status" -eq 0 ]
+    [ "$(printf '%s' "$output" | jq -r '.class')" = "transport" ]
+}
