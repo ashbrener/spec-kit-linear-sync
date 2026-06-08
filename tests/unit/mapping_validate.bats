@@ -189,3 +189,56 @@ validate() {
     [ "${status}" -eq 0 ]
     [ "${output}" = "CHILD" ]
 }
+
+@test "mapping_is_default: true for a no-block config (dispatch → default path)" {
+    write_config ''
+    run bash -c "source '${CONFIG_SH}'; config::load '${CFG}'; if config::mapping_is_default; then echo DEFAULT; else echo MAPPED; fi"
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "DEFAULT" ]
+}
+
+@test "mapping_is_default: false for the #17 spec-as-Project shape (dispatch → mapped path)" {
+    write_config '  mapping:
+    levels:
+      repo:
+        artifact: "Initiative"
+        relationship_to_parent: "none"
+      spec:
+        artifact: "Project"
+        relationship_to_parent: "parent"
+      phase:
+        artifact: "Issue"
+        relationship_to_parent: "parent"
+      task:
+        artifact: "sub-issue"
+        relationship_to_parent: "parent"'
+    run bash -c "source '${CONFIG_SH}'; config::load '${CFG}'; if config::mapping_is_default; then echo DEFAULT; else echo MAPPED; fi"
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "MAPPED" ]
+}
+
+@test "mapping_is_default: false when only the L0 super-level is enabled" {
+    write_config '  mapping:
+    l0:
+      enabled: true
+      artifact: "Initiative"
+      on_absent: "degrade"
+      source: "spec_input"'
+    run bash -c "source '${CONFIG_SH}'; config::load '${CFG}'; if config::mapping_is_default; then echo DEFAULT; else echo MAPPED; fi"
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "MAPPED" ]
+}
+
+@test "mapping_is_default: true for an explicit default block (alias equivalence)" {
+    write_config '  mapping:
+    levels:
+      spec:
+        artifact: "Issue"
+        relationship_to_parent: "parent"
+      task:
+        artifact: "checklist"
+        relationship_to_parent: "checklist"'
+    run bash -c "source '${CONFIG_SH}'; config::load '${CFG}'; if config::mapping_is_default; then echo DEFAULT; else echo MAPPED; fi"
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "DEFAULT" ]
+}

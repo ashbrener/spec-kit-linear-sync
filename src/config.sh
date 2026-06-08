@@ -1135,3 +1135,23 @@ config::mapping_validate() {
 
     return 0
 }
+
+# config::mapping_is_default
+# Return 0 (true) when the resolved mapping is exactly the frozen zero-config
+# default (every level at its default artifact + relationship, L0 disabled), so
+# reconcile can take the battle-tested default projection path; return 1 when
+# any level is overridden or the L0 super-level is on (→ the mapped projection
+# path). This is the dispatch predicate for the parallel projection path
+# (projection-design.md, Decision 1).
+config::mapping_is_default() {
+    config::_require_loaded
+    if config::l0_enabled; then
+        return 1
+    fi
+    local level
+    for level in "${CONFIG_MAPPING_LEVELS[@]}"; do
+        [[ "$(config::resolved_artifact "${level}")" == "$(config::_mapping_default_artifact "${level}")" ]] || return 1
+        [[ "$(config::resolved_relationship "${level}")" == "$(config::_mapping_default_relationship "${level}")" ]] || return 1
+    done
+    return 0
+}
