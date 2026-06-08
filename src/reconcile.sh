@@ -2068,6 +2068,15 @@ reconcile::ensure_project() {
 reconcile::link_project_to_initiative() {
     local project_id="$1" initiative_id="$2"
 
+    # In --dry-run a would-be-created Project/Initiative carries a placeholder
+    # id; the real project(id:…) query below would fail Linear's UUID
+    # validation. Log the planned link and return instead.
+    if (( ARG_DRY_RUN == 1 )) && [[ "$project_id" == dry-run* || "$initiative_id" == dry-run* ]]; then
+        reconcile::log "DRY-RUN projectUpdate addInitiativeIds project=${project_id} initiative=${initiative_id} (placeholder ids)"
+        summary::add updated "project↔initiative link (dry-run)"
+        return 0
+    fi
+
     local query='query ProjInitiatives($id: String!) {
         project(id: $id) { initiatives { nodes { id } } }
     }'
@@ -2115,6 +2124,17 @@ reconcile::_mapped_ensure_issue() {
     local label="$1" project_id="$2" title="$3" description="$4" state_uuid="$5" parent_id="${6:-}"
     local team_id
     team_id="$(config::get_team_id)"
+
+    # In --dry-run, a would-be-created parent Project/Issue carries a placeholder
+    # id, so its children definitionally don't exist yet AND the real
+    # issues(filter:{project:{id:…}}) query below would fail Linear's UUID
+    # validation. Log the planned create and return a placeholder child id.
+    if (( ARG_DRY_RUN == 1 )) && [[ "$project_id" == dry-run* || "$parent_id" == dry-run* ]]; then
+        reconcile::log "DRY-RUN issueCreate label=${label} project=${project_id} parent=${parent_id:-} (placeholder parent)"
+        summary::add created "issueCreate ${label} (dry-run)"
+        printf 'dry-run-issue-%s' "$label"
+        return 0
+    fi
 
     local label_ids
     label_ids="$(reconcile::_resolve_label_ids_array "$label")"
