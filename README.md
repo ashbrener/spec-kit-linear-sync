@@ -2,7 +2,7 @@
 
 **Keep Linear in sync with your spec-driven project, automatically.** Every spec on disk becomes a Linear issue (and every task phase a sub-issue), so you can see — and steer — every active spec across every repo from one place. You keep working in your files as usual; the bridge mirrors them into Linear for you and keeps it current as you plan, build, and merge. Your files stay the single source of truth — Linear is the always-up-to-date view, never something you edit by hand.
 
-- **Version:** 0.2.1
+- **Version:** 0.3.0
 - **Repository:** <https://github.com/ashbrener/spec-kit-linear-sync>
 - **License:** MIT
 - **Requires:** Spec Kit ≥ 0.1.0 · bash 4+ · `curl` · `jq` · `gh` (optional) · `git`
@@ -43,32 +43,34 @@ graph TD
 ```
 
 1. The extension installs an `after_*` hook for every `/speckit.*` lifecycle command. Every time you specify, clarify, plan, tasks, implement, or analyze, the hook fires `/speckit.linear.push`.
-2. `push` reads every `specs/NNN-feature/` directory on disk, infers the spec's lifecycle phase from artifact presence (per FR-012), and idempotently writes to Linear: spec Issue title + description (with memory block), sub-issue per task phase (with checklist mirror), blocking relations, clarify-session comments, `phase:*` / `task-phase:*` / `speckit-spec:NNN` labels.
+2. `push` reads every `specs/NNN-feature/` directory on disk, infers the spec's lifecycle phase from artifact presence (per FR-012), and idempotently writes to Linear: spec Issue title + description (the spec's own `Input` + `## Overview` + body inlined and size-capped, plus the bridge-owned memory block, plus a link to the full spec — spec 006), sub-issue per task phase (with checklist mirror), blocking relations, clarify-session comments, `phase:*` / `task-phase:*` / `speckit-spec:NNN` labels.
 3. Local git hooks (`post-checkout`, `post-commit`, `post-merge`) also fire the reconciler, so branch switches and ticked-off tasks land in Linear without re-running a spec-kit command.
 4. A shipped GitHub Action (`spec-kit-linear-sync.yml`) listens for PR events and flips the spec Issue to `Ready-to-merge` and `Merged` in real time — even when your laptop is closed.
 5. The reconciler is **filesystem-driven**: it never reads Linear state and writes back to disk. Linear is the mirror; the markdown wins every conflict.
 
 ## Install
 
-Until this extension lands in the spec-kit community catalog, install from the GitHub archive URL (the CLI's `--from` flag expects a direct ZIP, not a repo URL):
+The extension is listed in the spec-kit community catalog, so the canonical install is the short form:
+
+```bash
+specify extension add linear
+```
+
+Two alternatives are available when you need them:
+
+**From the GitHub archive URL** (the CLI's `--from` flag expects a direct ZIP, not a repo URL) — useful for pinning to a branch or release before the catalog refreshes:
 
 ```bash
 specify extension add linear --from https://github.com/ashbrener/spec-kit-linear-sync/archive/refs/heads/main.zip
 ```
 
-Or install from a local checkout (symlinks rather than copies, so your local edits flow through):
+**From a local checkout** (symlinks rather than copies, so your local edits flow through) — useful when developing the bridge itself:
 
 ```bash
 specify extension add /path/to/spec-kit-linear-sync --dev
 ```
 
 Run this from a **separate consumer repo**, not from inside the bridge's own checkout. The install detects source-equals-target and halts with exit 2 (FR-046) rather than copy the bridge into itself.
-
-Once the extension is listed in the catalog, the shorter form will work:
-
-```bash
-specify extension add linear
-```
 
 Either path registers the `after_*` hooks into your project's `.specify/extensions.yml`, drops local git hooks into `.git/hooks/`, scaffolds the committed `.specify/extensions/linear/linear-config.yml`, and creates the gitignored `.specify/extensions/linear/linear-operator.local.yml` for your identity.
 
@@ -78,7 +80,9 @@ If the install reports a vendored `.git/` warning under `.specify/extensions/lin
 
 1. **Run `/speckit.linear.install`.** This is the interactive install ceremony. It resolves your Linear Team UUID (auto-picks if your workspace has one team; prompts otherwise), creates or attaches a Linear Project for this repo, writes the shareable binding to `.specify/extensions/linear/linear-config.yml` (committed so collaborators inherit it), captures your operator identity via Linear's `viewer` query and writes it to the gitignored `.specify/extensions/linear/linear-operator.local.yml`, and optionally installs the GitHub Action layer.
 
-2. **Run `/speckit.linear.seed`.** One-shot per Linear workspace — creates the 9 lifecycle workflow states (`Specifying`, `Clarifying`, `Planning`, `Tasking`, `Red-team`, `Implementing`, `Analyzing`, `Ready-to-merge`, `Merged`), the 9 `phase:*` labels, and `task-phase:1`..`task-phase:9`. Captures every UUID at creation and writes it back into `linear-config.yml` (per FR-032) so renames in Linear's UI never break the bridge.
+2. **Run `/speckit.linear.seed`.** One-shot setup — creates the 9 lifecycle workflow states (`Specifying`, `Clarifying`, `Planning`, `Tasking`, `Red-team`, `Implementing`, `Analyzing`, `Ready-to-merge`, `Merged`), the 9 `phase:*` labels, and `task-phase:1`..`task-phase:9`. Captures every UUID at creation and writes it back into `linear-config.yml` (per FR-032) so renames in Linear's UI never break the bridge.
+
+   **No workspace-admin? You can still seed (spec [`005-team-scoped-seeding`](./specs/005-team-scoped-seeding/spec.md), v0.3.0).** The seed takes a `--scope workspace|team` option (default `team`): team scope creates the workflow states **and** labels scoped to your configured team, needing only team-level permissions — never workspace-admin. If an admin (or a prior run) already created the resources, the **adopt-existing** path captures their UUIDs into config by name instead of creating them, so you need no create permission at all. When a create call hits a permission/limit error, the seed surfaces an actionable message naming the resource and pointing you at the adopt / team-scoped path rather than hard-failing. The captured config is identical in shape regardless of scope or path, and re-seeding stays idempotent (0 `created` events).
 
 3. **Use spec-kit as normal.** Every `/speckit.specify`, `.clarify`, `.plan`, `.tasks`, `.implement`, `.analyze` now fires `/speckit.linear.push` automatically. The first run for any pre-existing spec backfills retroactively — Linear converges to the correct end-state without producing spurious intermediate-phase comments (FR-014).
 
@@ -89,7 +93,7 @@ The five command surface:
 | Command | Direction | Description |
 |---|---|---|
 | `/speckit.linear.install` | install-time only | Resolves Team / Project UUIDs, writes the committed `linear-config.yml`, scaffolds the gitignored `linear-operator.local.yml` (your identity), registers hooks, optionally installs the GitHub Action. |
-| `/speckit.linear.seed` | workspace setup | Creates lifecycle workflow states + labels. Idempotent; safe to re-run. |
+| `/speckit.linear.seed` | workspace / team setup | Creates lifecycle workflow states + labels. Takes `--scope workspace\|team` (default `team`); a non-admin operator can seed via team-scoped create or the **adopt-existing** path (captures UUIDs of resources an admin already made). Idempotent; safe to re-run. (spec 005) |
 | `/speckit.linear.push` | disk → Linear (write) | The reconciler. Fires automatically on every `/speckit.*` hook; also invokable on demand. |
 | `/speckit.linear.pull` | Linear → terminal (read-only) | Cross-repo unified inspect. Surfaces every spec Issue across every repo bound to the workspace. |
 | `/speckit.linear.status` | terminal (read-only) | Drift report — per spec, flags mismatches between disk and Linear (lifecycle, branch, last-touched, checklist completion). |
@@ -134,8 +138,9 @@ Spec-kit artifacts map to Linear primitives one-to-one:
 |---|---|
 | Consumer repository | **Project** (1 per repo, stamped with the repo's directory name) |
 | Spec (`specs/NNN-feature/`) | **Issue** under that Project, identified by the workspace label `speckit-spec:NNN` (FR-004b) |
+| Spec content (`Input` + `## Overview` + body) | Inlined into the Issue **description** so the issue is self-contained — size-capped, truncated at a clean boundary when oversized, always with a link to the full spec (v0.3.0, spec [`006-faithful-projection`](./specs/006-faithful-projection/spec.md)). Idempotent: an unchanged spec produces no description churn. |
 | Lifecycle phase (`Specifying` / `Clarifying` / …) | Workflow state on the spec Issue + `phase:*` label |
-| Task phase (`## Phase N: <Name>` block in `tasks.md`) | **Sub-issue** under the spec Issue, with `task-phase:N` label |
+| Task phase (`## Phase N <sep> <Name>` block in `tasks.md`) | **Sub-issue** under the spec Issue, with `task-phase:N` label. As of v0.3.0 `push` accepts `:`, `—` (em-dash), `-`, or whitespace after `## Phase N` — all produce the same sub-issue (spec [`006-faithful-projection`](./specs/006-faithful-projection/spec.md)); a `## Phase` line with no extractable number still raises a near-miss warning. |
 | Tasks within a phase | **Markdown checklist** in the sub-issue's description (read-only mirror per FR-006) |
 | Inter-task-phase ordering | Linear **blocking relations** between sub-issues |
 | Each `### Session YYYY-MM-DD` clarify block | **Comment** on the spec Issue, one per session |
