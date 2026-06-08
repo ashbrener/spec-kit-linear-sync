@@ -1815,6 +1815,246 @@ reconcile::mutate_comment_create() {
 }
 
 # =============================================================================
+# spec 007 — mapping-driven projection: leaf helpers (Initiative / Project).
+#
+# These power the non-default projection path (config::resolved_* != the frozen
+# default). They are intentionally separate from the default path's
+# issue-centric helpers above. Identity for Initiatives and Projects — which do
+# NOT carry issue labels — is a stable description marker (see
+# specs/007-configurable-mapping/projection-design.md, Decision 2), matched on
+# read exactly like the bridge's memory-block marker. The marker id is
+# filesystem-derived (e.g. `speckit-repo:<slug>`, `speckit-spec:<NNN>`), never
+# minted from Linear state (Principle II).
+# =============================================================================
+
+# The HTML-comment identity marker embedded in an Initiative/Project
+# description. `<id>` is the filesystem-derived identity (prefix + key).
+readonly RECONCILE_MAPPING_ID_OPEN="<!-- speckit-id: "
+readonly RECONCILE_MAPPING_ID_CLOSE=" -->"
+
+# reconcile::mapping_id_marker <id>
+#   Echo the stable description-marker line for an identity id.
+reconcile::mapping_id_marker() {
+    printf '%s%s%s' "${RECONCILE_MAPPING_ID_OPEN}" "$1" "${RECONCILE_MAPPING_ID_CLOSE}"
+}
+
+# reconcile::mapping_id_extract <text>
+#   Echo the identity id carried in the FIRST marker found in <text>, or
+#   empty. Pure string op (no Linear call) so it is trivially testable.
+reconcile::mapping_id_extract() {
+    local text="$1"
+    # Match the first "<!-- speckit-id: X -->" and capture X (trimmed).
+    local line
+    line="$(printf '%s\n' "$text" | grep -o "${RECONCILE_MAPPING_ID_OPEN}[^>]*${RECONCILE_MAPPING_ID_CLOSE}" | head -n1 || true)"
+    if [[ -z "$line" ]]; then
+        return 0
+    fi
+    line="${line#"${RECONCILE_MAPPING_ID_OPEN}"}"
+    line="${line%"${RECONCILE_MAPPING_ID_CLOSE}"}"
+    # Trim surrounding whitespace.
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    printf '%s' "$line"
+}
+
+# reconcile::_compose_marked_description <body> <id>
+#   Echo a description body with the identity marker appended on its own
+#   trailing line (idempotent: if <body> already carries the marker, it is
+#   returned unchanged so re-renders are byte-stable).
+reconcile::_compose_marked_description() {
+    local body="$1" id="$2"
+    local marker
+    marker="$(reconcile::mapping_id_marker "$id")"
+    if [[ "$body" == *"$marker"* ]]; then
+        printf '%s' "$body"
+        return 0
+    fi
+    if [[ -z "$body" ]]; then
+        printf '%s' "$marker"
+    else
+        printf '%s\n\n%s' "$body" "$marker"
+    fi
+}
+
+# reconcile::query_initiative_by_marker <id>
+#   Echo `{id,name,description}` of the Initiative whose description carries
+#   the identity marker for <id>, or empty on no match. Linear has no
+#   description-substring filter, so we list and match client-side.
+reconcile::query_initiative_by_marker() {
+    local id="$1"
+    local marker
+    marker="$(reconcile::mapping_id_marker "$id")"
+    local query='query ListInitiatives {
+        initiatives(first: 250) { nodes { id name description } }
+    }'
+    local response
+    response="$(graphql::query "$query" '{}')"
+    printf '%s' "$response" | jq -c --arg m "$marker" '
+        [ .data.initiatives.nodes[]?
+          | select((.description // "") | contains($m)) ]
+        | (first // empty)
+    '
+}
+
+# reconcile::ensure_initiative <id> <name> <body>
+#   Idempotently project an Initiative carrying the <id> marker. Creates it
+#   when absent; updates name/description only when they differ (zero churn);
+#   skips otherwise. Echoes the Initiative UUID on stdout.
+reconcile::ensure_initiative() {
+    local id="$1" name="$2" body="$3"
+    local desired_desc existing existing_id existing_name existing_desc
+    desired_desc="$(reconcile::_compose_marked_description "$body" "$id")"
+
+    existing="$(reconcile::query_initiative_by_marker "$id")"
+    if [[ -n "$existing" && "$existing" != "null" ]]; then
+        existing_id="$(printf '%s' "$existing" | jq -r '.id')"
+        existing_name="$(printf '%s' "$existing" | jq -r '.name // ""')"
+        existing_desc="$(printf '%s' "$existing" | jq -r '.description // ""')"
+        if [[ "$existing_name" == "$name" && "$existing_desc" == "$desired_desc" ]]; then
+            summary::add skipped "initiative '${name}' (unchanged)"
+            printf '%s' "$existing_id"
+            return 0
+        fi
+        if (( ARG_DRY_RUN == 1 )); then
+            reconcile::log "DRY-RUN initiativeUpdate id=${existing_id}"
+            summary::add updated "initiative '${name}' (dry-run)"
+            printf '%s' "$existing_id"
+            return 0
+        fi
+        local mutation='mutation UpdInitiative($id: String!, $input: InitiativeUpdateInput!) {
+            initiativeUpdate(id: $id, input: $input) { success }
+        }'
+        local vars
+        vars="$(jq -nc --arg id "$existing_id" --arg name "$name" --arg desc "$desired_desc" \
+            '{id: $id, input: {name: $name, description: $desc}}')"
+        local resp
+        if ! resp="$(graphql::mutate "$mutation" "$vars")" \
+            || ! printf '%s' "$resp" | jq -e '.data.initiativeUpdate.success == true' >/dev/null 2>&1; then
+            summary::add error "initiativeUpdate '${name}' failed"
+            reconcile::promote_exit 1
+            printf '%s' "$existing_id"
+            return 1
+        fi
+        summary::add updated "initiative '${name}'"
+        printf '%s' "$existing_id"
+        return 0
+    fi
+
+    # Not found → create.
+    if (( ARG_DRY_RUN == 1 )); then
+        reconcile::log "DRY-RUN initiativeCreate name=${name}"
+        summary::add created "initiative '${name}' (dry-run)"
+        printf 'dry-run-initiative-id'
+        return 0
+    fi
+    local mutation='mutation NewInitiative($input: InitiativeCreateInput!) {
+        initiativeCreate(input: $input) { success initiative { id } }
+    }'
+    local vars
+    vars="$(jq -nc --arg name "$name" --arg desc "$desired_desc" \
+        '{input: {name: $name, description: $desc}}')"
+    local resp new_id
+    if ! resp="$(graphql::mutate "$mutation" "$vars")" \
+        || ! printf '%s' "$resp" | jq -e '.data.initiativeCreate.success == true' >/dev/null 2>&1; then
+        summary::add error "initiativeCreate '${name}' failed"
+        reconcile::promote_exit 1
+        return 1
+    fi
+    new_id="$(printf '%s' "$resp" | jq -r '.data.initiativeCreate.initiative.id')"
+    summary::add created "initiative '${name}' → ${new_id}"
+    printf '%s' "$new_id"
+}
+
+# reconcile::query_project_by_marker <id> <team_uuid>
+#   Echo `{id,name,description}` of the Project (within the team) whose
+#   description carries the identity marker for <id>, or empty on no match.
+reconcile::query_project_by_marker() {
+    local id="$1" team_uuid="$2"
+    local marker
+    marker="$(reconcile::mapping_id_marker "$id")"
+    local query='query ListTeamProjects($team: String!) {
+        team(id: $team) { projects(first: 250) { nodes { id name description } } }
+    }'
+    local vars response
+    vars="$(jq -nc --arg team "$team_uuid" '{team: $team}')"
+    response="$(graphql::query "$query" "$vars")"
+    printf '%s' "$response" | jq -c --arg m "$marker" '
+        [ .data.team.projects.nodes[]?
+          | select((.description // "") | contains($m)) ]
+        | (first // empty)
+    '
+}
+
+# reconcile::ensure_project <id> <name> <body> <team_uuid>
+#   Idempotently project a Project carrying the <id> marker, scoped to the
+#   team. Creates when absent; updates name/description only when they differ;
+#   skips otherwise. Echoes the Project UUID. (Linking to a parent Initiative
+#   is handled by the caller in the US2 wiring step.)
+reconcile::ensure_project() {
+    local id="$1" name="$2" body="$3" team_uuid="$4"
+    local desired_desc existing existing_id existing_name existing_desc
+    desired_desc="$(reconcile::_compose_marked_description "$body" "$id")"
+
+    existing="$(reconcile::query_project_by_marker "$id" "$team_uuid")"
+    if [[ -n "$existing" && "$existing" != "null" ]]; then
+        existing_id="$(printf '%s' "$existing" | jq -r '.id')"
+        existing_name="$(printf '%s' "$existing" | jq -r '.name // ""')"
+        existing_desc="$(printf '%s' "$existing" | jq -r '.description // ""')"
+        if [[ "$existing_name" == "$name" && "$existing_desc" == "$desired_desc" ]]; then
+            summary::add skipped "project '${name}' (unchanged)"
+            printf '%s' "$existing_id"
+            return 0
+        fi
+        if (( ARG_DRY_RUN == 1 )); then
+            reconcile::log "DRY-RUN projectUpdate id=${existing_id}"
+            summary::add updated "project '${name}' (dry-run)"
+            printf '%s' "$existing_id"
+            return 0
+        fi
+        local mutation='mutation UpdProject($id: String!, $input: ProjectUpdateInput!) {
+            projectUpdate(id: $id, input: $input) { success }
+        }'
+        local vars
+        vars="$(jq -nc --arg id "$existing_id" --arg name "$name" --arg desc "$desired_desc" \
+            '{id: $id, input: {name: $name, description: $desc}}')"
+        local resp
+        if ! resp="$(graphql::mutate "$mutation" "$vars")" \
+            || ! printf '%s' "$resp" | jq -e '.data.projectUpdate.success == true' >/dev/null 2>&1; then
+            summary::add error "projectUpdate '${name}' failed"
+            reconcile::promote_exit 1
+            printf '%s' "$existing_id"
+            return 1
+        fi
+        summary::add updated "project '${name}'"
+        printf '%s' "$existing_id"
+        return 0
+    fi
+
+    if (( ARG_DRY_RUN == 1 )); then
+        reconcile::log "DRY-RUN projectCreate name=${name}"
+        summary::add created "project '${name}' (dry-run)"
+        printf 'dry-run-project-id'
+        return 0
+    fi
+    local mutation='mutation NewProject($input: ProjectCreateInput!) {
+        projectCreate(input: $input) { success project { id } }
+    }'
+    local vars
+    vars="$(jq -nc --arg name "$name" --arg desc "$desired_desc" --arg team "$team_uuid" \
+        '{input: {name: $name, description: $desc, teamIds: [$team]}}')"
+    local resp new_id
+    if ! resp="$(graphql::mutate "$mutation" "$vars")" \
+        || ! printf '%s' "$resp" | jq -e '.data.projectCreate.success == true' >/dev/null 2>&1; then
+        summary::add error "projectCreate '${name}' failed"
+        reconcile::promote_exit 1
+        return 1
+    fi
+    new_id="$(printf '%s' "$resp" | jq -r '.data.projectCreate.project.id')"
+    summary::add created "project '${name}' → ${new_id}"
+    printf '%s' "$new_id"
+}
+
+# =============================================================================
 # Per-spec orchestration.
 # =============================================================================
 
