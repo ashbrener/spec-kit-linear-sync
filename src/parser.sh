@@ -271,7 +271,7 @@ parser::lifecycle_phase() {
 parser::task_phases() {
     local tasks_md="$1"
     [[ -f "$tasks_md" ]] || return 0
-    awk "$PARSER_PHASE_HEADER_AWK"'
+    LC_ALL=C awk "$PARSER_PHASE_HEADER_AWK"'
         {
             split_phase_header($0, parsed)
             if (parsed["ok"] == 1) {
@@ -313,7 +313,7 @@ parser::tasks_in_phase() {
     local tasks_md="$1"
     local phase_index="$2"
     [[ -f "$tasks_md" ]] || return 0
-    awk -v want="$phase_index" "$PARSER_PHASE_HEADER_AWK"'
+    LC_ALL=C awk -v want="$phase_index" "$PARSER_PHASE_HEADER_AWK"'
         /^## Phase / {
             split_phase_header($0, parsed)
             if (parsed["ok"] == 1) {
@@ -435,7 +435,7 @@ parser::spec_estimate() {
 parser::malformed_task_lines() {
     local tasks_md="$1"
     [[ -f "$tasks_md" ]] || return 0
-    awk "$PARSER_PHASE_HEADER_AWK"'
+    LC_ALL=C awk "$PARSER_PHASE_HEADER_AWK"'
         /^## Phase / {
             split_phase_header($0, parsed)
             in_phase = (parsed["ok"] == 1) ? 1 : 0
@@ -475,7 +475,7 @@ parser::malformed_task_lines() {
 parser::phase_header_near_misses() {
     local tasks_md="$1"
     [[ -f "$tasks_md" ]] || return 0
-    awk "$PARSER_PHASE_HEADER_AWK"'
+    LC_ALL=C awk "$PARSER_PHASE_HEADER_AWK"'
         # A line that LOOKS like a phase header — "## Phase" followed by
         # whitespace, a ":" (e.g. "## Phase: Setup"), or end-of-line —
         # but does NOT parse to a phase number+name under the broadened

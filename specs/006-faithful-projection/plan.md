@@ -22,6 +22,7 @@ but shipped together as one "the issue reflects the spec" theme:
 ## Design
 
 ### Part A — parser (`src/parser.sh`)
+
 - The separator after `## Phase <N>` becomes any of `:` / `—` / `-` /
   whitespace, applied **consistently** across `parser::task_phases`,
   `parser::tasks_in_phase`, and `parser::malformed_task_lines` so phase
@@ -32,6 +33,7 @@ but shipped together as one "the issue reflects the spec" theme:
   run (e.g. `Phase one`) remains a near-miss and still triggers the #45 warning.
 
 ### Part B — description (`src/reconcile.sh`)
+
 - Assemble inlined content in document order: `**Input**` → `## Overview` →
   remaining body sections, into the issue description (the read-only mirror),
   bounded by `RECONCILE_SPEC_CONTENT_MAX_CHARS` (6000).
