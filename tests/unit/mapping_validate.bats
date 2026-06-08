@@ -47,9 +47,12 @@ validate() {
     run bash -c "source '${CONFIG_SH}'; config::load '${CFG}'; config::mapping_validate"
 }
 
-@test "the #17 spec-as-Project shape validates (task→sub-issue/parent allowed)" {
+@test "the corrected #17 spec-as-Project shape validates (repo→Initiative > Project > Issue > sub-issue)" {
     write_config '  mapping:
     levels:
+      repo:
+        artifact: "Initiative"
+        relationship_to_parent: "none"
       spec:
         artifact: "Project"
         relationship_to_parent: "parent"
@@ -61,6 +64,32 @@ validate() {
         relationship_to_parent: "parent"'
     validate
     [ "${status}" -eq 0 ]
+}
+
+@test "Project nested under Project is rejected (Linear cannot build it; use Initiative)" {
+    write_config '  mapping:
+    levels:
+      spec:
+        artifact: "Project"
+        relationship_to_parent: "parent"'
+    validate
+    [ "${status}" -eq 2 ]
+    [[ "${output}" == *"cannot nest under"* ]]
+    [[ "${output}" == *"Initiative"* ]]
+}
+
+@test "Issue nested under an Initiative is rejected (needs a Project parent)" {
+    write_config '  mapping:
+    levels:
+      repo:
+        artifact: "Initiative"
+        relationship_to_parent: "none"
+      spec:
+        artifact: "Issue"
+        relationship_to_parent: "parent"'
+    validate
+    [ "${status}" -eq 2 ]
+    [[ "${output}" == *"cannot nest under"* ]]
 }
 
 @test "blocks as a hierarchy link is rejected (exit 2)" {
@@ -133,7 +162,7 @@ validate() {
     write_config '  mapping:
     l0:
       enabled: true
-      artifact: "Milestone"
+      artifact: "Initiative"
       on_absent: "degrade"
       source: "spec_input"
     levels:
@@ -153,7 +182,7 @@ validate() {
     write_config '  mapping:
     l0:
       enabled: true
-      artifact: "Milestone"
+      artifact: "Initiative"
       on_absent: "degrade"
       source: "spec_input"'
     run bash -c "source '${CONFIG_SH}'; config::load '${CFG}'; if config::is_top_level repo; then echo TOP; else echo CHILD; fi"

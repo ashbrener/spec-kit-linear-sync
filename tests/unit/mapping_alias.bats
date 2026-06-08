@@ -47,7 +47,7 @@ linear:
   mapping:
     l0:
       enabled: false
-      artifact: "Milestone"
+      artifact: "Initiative"
       on_absent: "degrade"
       source: "spec_input"
     levels:

@@ -68,7 +68,7 @@ EOF
     write_config '  mapping:
     l0:
       enabled: true
-      artifact: "Milestone"
+      artifact: "Initiative"
       on_absent: "degrade"
       source: "spec_input"'
     run bash -c "source '${CONFIG_SH}'; config::load '${CFG}'; config::l0_field enabled; config::l0_field on_absent; config::l0_field source"

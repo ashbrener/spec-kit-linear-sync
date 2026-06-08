@@ -821,13 +821,60 @@ config::validate() {
 # ===========================================================================
 
 readonly -a CONFIG_MAPPING_LEVELS=("repo" "spec" "phase" "task")
-# Artifacts a required level may project to (Milestone is L0-only, validated
-# separately). The `checklist` sentinel projects no standalone artifact.
-readonly -a CONFIG_MAPPING_ARTIFACTS=("Project" "Issue" "sub-issue" "checklist")
+# Artifacts a level may project to. `Initiative` is Linear's above-Project
+# container (used by the #17 spec-as-Project shape and the L0 narrative
+# super-level); `checklist` is an in-body sentinel that projects no standalone
+# artifact. NOTE: a Linear Milestone is NOT in this set — Milestones live
+# *inside* a Project (they sub-divide its timeline) and cannot act as an
+# above-Project container, so the narrative super-level is an `Initiative`.
+readonly -a CONFIG_MAPPING_ARTIFACTS=("Initiative" "Project" "Issue" "sub-issue" "checklist")
 # Allowed hierarchy links. `blocks`/`relates` are dependency links, not nesting,
 # and are rejected (FR-006); anything else is likewise rejected.
 readonly -a CONFIG_MAPPING_RELATIONSHIPS=("parent" "none" "checklist")
-readonly CONFIG_MAPPING_L0_ARTIFACT="Milestone"
+# The artifact the L0 narrative super-level projects to: a Linear Initiative
+# (the real above-Project container). Degrades via on_absent when the workspace
+# plan lacks Initiatives (FR-011).
+readonly CONFIG_MAPPING_L0_ARTIFACT="Initiative"
+
+# Linear-native containment: for a child artifact (key), the set of parent
+# artifacts Linear can actually nest it under. This guards against mappings the
+# validator would otherwise wave through but the projection could never build
+# (e.g. a Project nested under another Project). `checklist` is in-body and is
+# handled by the relationship rules, not this table.
+#   Initiative > Project > Issue > sub-issue
+config::_valid_parent_artifacts() {
+    case "$1" in
+        Initiative) printf '' ;;            # top-level only; Initiatives do not nest
+        Project)    printf 'Initiative' ;;  # a Project belongs to an Initiative
+        Issue)      printf 'Project' ;;     # an Issue belongs to a Project
+        sub-issue)  printf 'Issue' ;;       # a sub-issue parents to an Issue
+        *)          printf '' ;;
+    esac
+}
+
+# config::_mapping_parent_level <level>
+# Echo the resolved parent level of a level in the active hierarchy, or empty
+# when the level is top. repo's parent is the L0 super-level only when enabled.
+config::_mapping_parent_level() {
+    case "$1" in
+        repo)  if config::l0_enabled; then printf 'l0'; fi ;;
+        spec)  printf 'repo' ;;
+        phase) printf 'spec' ;;
+        task)  printf 'phase' ;;
+        *)     return 1 ;;
+    esac
+}
+
+# config::_mapping_level_artifact <level>
+# Echo a level's resolved artifact, transparently handling the synthetic `l0`
+# level (whose artifact comes from config::l0_field, not the levels block).
+config::_mapping_level_artifact() {
+    if [[ "$1" == "l0" ]]; then
+        config::l0_field artifact
+    else
+        config::resolved_artifact "$1"
+    fi
+}
 
 # config::_in_list <needle> <haystack...>
 # Return 0 if <needle> equals one of the remaining args, else 1.
@@ -980,11 +1027,11 @@ config::mapping_validate() {
     fi
     if [[ "${l0_enabled_raw}" == "true" ]]; then
         l0_on="true"
-        local l0_artifact="${CONFIG_VALUES[linear.mapping.l0.artifact]:-Milestone}"
+        local l0_artifact="${CONFIG_VALUES[linear.mapping.l0.artifact]:-Initiative}"
         local l0_on_absent="${CONFIG_VALUES[linear.mapping.l0.on_absent]:-degrade}"
         local l0_source="${CONFIG_VALUES[linear.mapping.l0.source]:-spec_input}"
-        if [[ "${l0_artifact}" != "Milestone" ]]; then
-            problems+=("${path}: mapping.l0.artifact: got '${l0_artifact}', only 'Milestone' is supported")
+        if [[ "${l0_artifact}" != "Initiative" ]]; then
+            problems+=("${path}: mapping.l0.artifact: got '${l0_artifact}', only 'Initiative' is supported (Linear Milestones live inside a Project and cannot be an above-Project narrative container)")
         fi
         if [[ "${l0_on_absent}" != "degrade" ]]; then
             problems+=("${path}: mapping.l0.on_absent: got '${l0_on_absent}', only 'degrade' is supported")
@@ -1038,6 +1085,33 @@ config::mapping_validate() {
                     fi
                     ;;
             esac
+        fi
+    done
+
+    # ---- Linear-native containment (nesting) validation -------------------
+    # For every non-top level linked by `parent`, the parent level's resolved
+    # artifact must be one Linear can actually nest the child under
+    # (Initiative > Project > Issue > sub-issue). This rejects mappings the
+    # relationship rules alone would accept but the projection could never
+    # build — e.g. a Project under a Project (use an Initiative as the parent
+    # level for the #17 spec-as-Project shape).
+    for level in "${CONFIG_MAPPING_LEVELS[@]}"; do
+        artifact="$(config::resolved_artifact "${level}")"
+        rel="$(config::resolved_relationship "${level}")"
+        if [[ "${artifact}" == "checklist" || "${rel}" != "parent" ]]; then
+            continue
+        fi
+        local parent_level parent_artifact valid_parents
+        parent_level="$(config::_mapping_parent_level "${level}")" || parent_level=""
+        if [[ -z "${parent_level}" ]]; then
+            continue
+        fi
+        parent_artifact="$(config::_mapping_level_artifact "${parent_level}")"
+        valid_parents="$(config::_valid_parent_artifacts "${artifact}")"
+        # Word-split intentional: valid_parents is a space-separated allow-list.
+        # shellcheck disable=SC2086
+        if ! config::_in_list "${parent_artifact}" ${valid_parents}; then
+            problems+=("${path}: mapping.levels.${level}: a '${artifact}' cannot nest under a '${parent_artifact}' (the ${parent_level} level); Linear allows Initiative > Project > Issue > sub-issue.${valid_parents:+ Valid parent artifact: ${valid_parents}.}")
         fi
     done
 

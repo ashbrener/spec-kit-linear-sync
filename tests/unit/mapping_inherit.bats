@@ -61,7 +61,7 @@ resolve_all() {
     write_config '  mapping:
     l0:
       enabled: true
-      artifact: "Milestone"
+      artifact: "Initiative"
       on_absent: "degrade"
       source: "spec_input"'
     run resolve_all
@@ -85,12 +85,14 @@ resolve_all() {
     [ "${lines[4]}" = "l0=false" ]
 }
 
-@test "partial block validates clean" {
+@test "partial block (default-equivalent levels) validates clean" {
+    # A partial that overrides only the task level to its synthesized default;
+    # the unspecified levels inherit and the whole resolves to today's default.
     write_config '  mapping:
     levels:
-      spec:
-        artifact: "Project"
-        relationship_to_parent: "parent"'
+      task:
+        artifact: "checklist"
+        relationship_to_parent: "checklist"'
     run bash -c "source '${CONFIG_SH}'; config::load '${CFG}'; config::mapping_validate && echo OK"
     [ "${status}" -eq 0 ]
     [ "${output}" = "OK" ]
