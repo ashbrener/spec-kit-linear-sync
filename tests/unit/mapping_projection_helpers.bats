@@ -195,7 +195,7 @@ teardown() {
 
 @test "link_project_to_initiative adds the link when absent" {
     export Q_RESP='{"data":{"project":{"initiatives":{"nodes":[]}}}}'
-    export M_RESP='{"data":{"projectUpdate":{"success":true}}}'
+    export M_RESP='{"data":{"initiativeToProjectCreate":{"success":true}}}'
     run bash -c '
         source "${RECONCILE_SH}" 2>/dev/null
         reconcile::log() { :; }; summary::add() { :; }
@@ -205,7 +205,7 @@ teardown() {
         reconcile::link_project_to_initiative "proj-1" "init-1"
     '
     [ "${status}" -eq 0 ]
-    grep -q "addInitiativeIds" "${CALLS}"
+    grep -q "initiativeId" "${CALLS}"
 }
 
 # ---------------------------------------------------------------------------
