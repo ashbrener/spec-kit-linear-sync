@@ -1227,10 +1227,13 @@ reconcile::_resolve_label_ids_array() {
 # =============================================================================
 reconcile::_resolve_operator_assignee_id() {
     local user_id
-    user_id="$(config::get_operator_user_id)"
+    # spec 004 — resolve via the cascade (env -> operator-local file),
+    # NEVER from the committed linear-config.yml (FR-005). Absence is
+    # warn-and-proceed-unassigned, never a halt (FR-011).
+    user_id="$(config::resolve_operator_user_id)"
     if [[ -z "$user_id" ]]; then
         if (( _RECONCILE_OPERATOR_WARNED == 0 )); then
-            summary::add warned "operator user_id missing from config; Issues will be unassigned (FR-034 graceful degradation)"
+            summary::add warned "operator identity not resolved (no LINEAR_OPERATOR_USER_ID env and no operator-local file); Issues will be unassigned (FR-011 graceful degradation)"
             _RECONCILE_OPERATOR_WARNED=1
         fi
         printf ''

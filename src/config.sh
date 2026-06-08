@@ -47,6 +47,32 @@ set -euo pipefail
 declare -gA CONFIG_VALUES=()
 declare -g CONFIG_LOADED_PATH=""
 
+# ---------------------------------------------------------------------------
+# Operator-local identity store (spec 004 — config / identity split).
+# Identity (user_id, name, email) lives in a SEPARATE gitignored file,
+# never in the committed `linear-config.yml`. The store is parsed into a
+# second associative array so the committed-config getters and the
+# identity getters never read from each other's namespace (FR-002,
+# FR-005). Resolution for identity is env → this store → (caller prompt).
+# ---------------------------------------------------------------------------
+declare -gA CONFIG_OPERATOR_VALUES=()
+# Diagnostic-only: records which operator-local file populated the store
+# (empty when none was found). Parallels CONFIG_LOADED_PATH; surfaced by
+# config::operator_loaded_path for callers/tests that want to assert the
+# source.
+declare -g CONFIG_OPERATOR_LOADED_PATH=""
+
+# Default location of the operator-local identity file, resolved relative
+# to PWD (the consumer repo root) like the committed config. The
+# `*.local.yml` suffix is matched by a single `.gitignore` glob.
+readonly CONFIG_OPERATOR_LOCAL_PATH_DEFAULT=".specify/extensions/linear/linear-operator.local.yml"
+
+# One-shot latch so the legacy-config migration notice (FR-007) is
+# emitted at most once per process. Idempotency across PROCESSES is
+# guaranteed structurally: the migration removes the `operator:` block
+# from the committed file, so the detector never fires on a later run.
+declare -g _CONFIG_MIGRATION_NOTICE_EMITTED=0
+
 # UUID regex per RFC 4122 (lowercase hex). Validation accepts upper or
 # lower case but the canonical form the seed step emits is lowercase.
 readonly CONFIG_UUID_REGEX='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
@@ -142,8 +168,14 @@ config::_strip() {
 # flat maps that live one level deeper than their parent). That is the
 # entire shape `config-template.yml` ever produces, so we don't try to
 # be a general-purpose YAML parser.
+#
+# <target-array> (optional, default CONFIG_VALUES) names the associative
+# array the parsed key→value pairs land in, via a bash nameref. This
+# lets the operator-local identity file (spec 004) reuse the exact same
+# shallow reader, populating CONFIG_OPERATOR_VALUES instead.
 config::_parse_file() {
     local path="$1"
+    local -n _cfg_target="${2:-CONFIG_VALUES}"
     local line raw_key raw_value
     local indent
     # Parallel arrays simulating a stack: stack[i] is the YAML key at
@@ -213,7 +245,7 @@ config::_parse_file() {
             fi
             local item="${lstripped#-}"
             item="$(config::_strip "${item}")"
-            CONFIG_VALUES["${current_prefix}.${list_counter}"]="${item}"
+            _cfg_target["${current_prefix}.${list_counter}"]="${item}"
             list_counter=$(( list_counter + 1 ))
             continue
         fi
@@ -244,7 +276,7 @@ config::_parse_file() {
             current_prefix="${full_key}"
             list_counter=0
         else
-            CONFIG_VALUES["${full_key}"]="${raw_value}"
+            _cfg_target["${full_key}"]="${raw_value}"
         fi
     done < "${path}"
 }
@@ -275,9 +307,140 @@ hint: copy config-template.yml to ${path} and run \`/spec-kit-linear-install\` t
 
     # Reset state so consecutive loads in the same process don't leak.
     CONFIG_VALUES=()
+    CONFIG_OPERATOR_VALUES=()
     CONFIG_LOADED_PATH="${path}"
+    CONFIG_OPERATOR_LOADED_PATH=""
 
-    config::_parse_file "${path}"
+    config::_parse_file "${path}" CONFIG_VALUES
+
+    # spec 004 — back-compat migration. A legacy single-file config that
+    # still carries `linear.operator.*` keys is migrated out: identity is
+    # moved into the operator-local file and the `operator:` block is
+    # stripped from the committed file, with exactly one notice (FR-007).
+    # Runs BEFORE the operator-local load so a freshly-migrated identity is
+    # immediately visible to the cascade in this same process.
+    config::_maybe_migrate_operator_block "${path}"
+
+    # spec 004 — load the operator-local identity store (env → file
+    # cascade is applied at getter time). Absent file is a no-op.
+    config::_load_operator_file
+}
+
+# config::_load_operator_file [path]
+# Parse the operator-local identity file (default
+# CONFIG_OPERATOR_LOCAL_PATH_DEFAULT) into CONFIG_OPERATOR_VALUES. An
+# absent file is a silent no-op (identity then resolves from env or
+# degrades gracefully per FR-011). A present-but-unreadable or malformed
+# file surfaces the SAME actionable diagnostic the committed loader emits
+# (Principle VIII — no silent failure).
+# shellcheck disable=SC2120  # the optional [path] arg is intentional (exercised
+# by unit tests); no runtime caller passes one, which is fine.
+config::_load_operator_file() {
+    local path="${1:-${CONFIG_OPERATOR_LOCAL_PATH_DEFAULT}}"
+
+    CONFIG_OPERATOR_VALUES=()
+    CONFIG_OPERATOR_LOADED_PATH=""
+
+    if [[ ! -e "${path}" ]]; then
+        return 0
+    fi
+    if [[ ! -r "${path}" ]]; then
+        config::_die "operator-local file not readable: ${path}"
+    fi
+
+    CONFIG_OPERATOR_LOADED_PATH="${path}"
+    config::_parse_file "${path}" CONFIG_OPERATOR_VALUES
+}
+
+# config::operator_loaded_path
+# Echo the path of the operator-local file that populated the identity
+# store, or empty if none was loaded. Diagnostic accessor (parity with
+# CONFIG_LOADED_PATH); used by tests asserting the cascade source.
+config::operator_loaded_path() {
+    printf '%s\n' "${CONFIG_OPERATOR_LOADED_PATH}"
+}
+
+# config::_maybe_migrate_operator_block <committed-path>
+# Detect a legacy `linear.operator.*` key in the just-parsed committed
+# config. If present:
+#   1. Move the identity into the operator-local file — but ONLY when
+#      that file does not already exist (the local file is authoritative
+#      per the spec's edge cases; legacy values are otherwise dropped).
+#   2. Strip the `operator:` block from the committed file in place.
+#   3. Emit exactly one migration notice (latched).
+# Idempotent: step 2 removes the trigger so a later run never re-fires.
+config::_maybe_migrate_operator_block() {
+    local committed_path="$1"
+
+    local legacy_user_id="${CONFIG_VALUES[linear.operator.user_id]:-}"
+    local legacy_name="${CONFIG_VALUES[linear.operator.name]:-}"
+    local legacy_email="${CONFIG_VALUES[linear.operator.email]:-}"
+
+    # No legacy block → nothing to migrate (the common, post-split case).
+    if [[ -z "${legacy_user_id}" && -z "${legacy_name}" && -z "${legacy_email}" ]]; then
+        return 0
+    fi
+
+    local local_path="${CONFIG_OPERATOR_LOCAL_PATH_DEFAULT}"
+
+    # 1. Write the operator-local file from the legacy values, only when
+    #    no operator-local file exists yet (local file wins if present).
+    if [[ ! -e "${local_path}" ]]; then
+        local dir
+        dir="$(dirname "${local_path}")"
+        mkdir -p "${dir}" 2>/dev/null || true
+        {
+            printf '# spec-kit-linear — operator-local identity (NEVER COMMIT).\n'
+            printf '# Migrated from a legacy linear-config.yml operator block (spec 004, FR-007).\n'
+            printf '# Resolution cascade: LINEAR_OPERATOR_USER_ID env -> this file -> prompt.\n'
+            printf 'schema_version: 1\n'
+            printf 'operator:\n'
+            printf '  user_id: "%s"\n' "${legacy_user_id}"
+            printf '  name: "%s"\n' "${legacy_name}"
+            printf '  email: "%s"\n' "${legacy_email}"
+        } > "${local_path}"
+    fi
+
+    # 2. Strip the `operator:` block from the committed file in place. The
+    #    block is a one-level child of `linear:` (two-space indent); its
+    #    children sit at four-space indent. Portable awk, matching the
+    #    style of install.sh's field substituters.
+    if [[ -w "${committed_path}" ]]; then
+        local tmp
+        tmp="$(mktemp -t spec-kit-linear-config.XXXXXX 2>/dev/null || mktemp)"
+        awk '
+            BEGIN { in_op = 0 }
+            {
+                # The operator: block opener at the two-space indent.
+                if ($0 ~ /^  operator:[[:space:]]*$/) {
+                    in_op = 1
+                    next
+                }
+                if (in_op == 1) {
+                    # Children of operator: sit deeper than two spaces.
+                    # A blank line inside the block is also dropped.
+                    if ($0 ~ /^    / || $0 ~ /^[[:space:]]*$/) {
+                        next
+                    }
+                    # Any line at the two-space (sibling) indent or
+                    # shallower closes the block; fall through to print it.
+                    in_op = 0
+                }
+                print
+            }
+        ' "${committed_path}" > "${tmp}" && mv "${tmp}" "${committed_path}"
+        # Drop the now-stale legacy keys from the in-memory committed store
+        # so getters that still read CONFIG_VALUES never see identity.
+        unset 'CONFIG_VALUES[linear.operator.user_id]'
+        unset 'CONFIG_VALUES[linear.operator.name]'
+        unset 'CONFIG_VALUES[linear.operator.email]'
+    fi
+
+    # 3. Emit exactly one migration notice.
+    if (( _CONFIG_MIGRATION_NOTICE_EMITTED == 0 )); then
+        config::_warn "migrated operator identity out of ${committed_path} into ${local_path} (spec 004, FR-007); the committed config no longer carries operator.* keys. Commit ${committed_path}; do not commit ${local_path} (it is gitignored)."
+        _CONFIG_MIGRATION_NOTICE_EMITTED=1
+    fi
 }
 
 # config::_require_loaded
@@ -310,33 +473,59 @@ config::get_project_id() {
     printf '%s\n' "${value}"
 }
 
+# config::resolve_operator_user_id
+# Resolve the Linear operator UUID via the spec-004 cascade:
+#   1. LINEAR_OPERATOR_USER_ID environment variable (highest — CI /
+#      ephemeral override, matching the LINEAR_API_KEY env-first model).
+#   2. operator.user_id from the operator-local file
+#      (CONFIG_OPERATOR_VALUES).
+#   3. empty — the caller (reconcile) warns and proceeds creating Issues
+#      unassigned (FR-011); never a halt.
+# MUST NOT read identity from the committed config (CONFIG_VALUES) — that
+# would re-introduce the leak this feature removes (FR-005).
+# Interactive prompting is the install/caller's responsibility; this
+# resolver is non-interactive and returns empty when nothing resolves.
+config::resolve_operator_user_id() {
+    if [[ -n "${LINEAR_OPERATOR_USER_ID:-}" ]]; then
+        printf '%s\n' "${LINEAR_OPERATOR_USER_ID}"
+        return 0
+    fi
+    printf '%s\n' "${CONFIG_OPERATOR_VALUES[operator.user_id]:-}"
+}
+
 # config::get_operator_user_id
-# Echo the Linear operator user UUID captured at install time via the
-# `viewer` query (FR-034). Empty (no halt) if absent — the reconciler
-# treats absence as a warning and creates Issues unassigned per the
-# graceful-degradation clause of FR-034. NOT added to config::validate's
-# required-fields list for the same reason.
+# Back-compat accessor (FR-009). Same cascade as
+# config::resolve_operator_user_id; retained so existing callers/tests
+# keep working. Empty (no halt) when absent — the reconciler treats
+# absence as a warning and creates Issues unassigned per FR-011.
 config::get_operator_user_id() {
     config::_require_loaded
-    printf '%s\n' "${CONFIG_VALUES[linear.operator.user_id]:-}"
+    config::resolve_operator_user_id
 }
 
 # config::get_operator_name
-# Echo the Linear operator's display name (informational; populated by
-# the install step's `viewer { name }` capture per FR-034). Empty if
-# absent.
+# Echo the operator's display name from the operator-local store, or the
+# LINEAR_OPERATOR_NAME env override. Informational; empty if absent.
 config::get_operator_name() {
     config::_require_loaded
-    printf '%s\n' "${CONFIG_VALUES[linear.operator.name]:-}"
+    if [[ -n "${LINEAR_OPERATOR_NAME:-}" ]]; then
+        printf '%s\n' "${LINEAR_OPERATOR_NAME}"
+        return 0
+    fi
+    printf '%s\n' "${CONFIG_OPERATOR_VALUES[operator.name]:-}"
 }
 
 # config::get_operator_email
-# Echo the Linear operator's email (informational; populated by the
-# install step's `viewer { email }` capture per FR-034). Empty if
-# absent.
+# Echo the operator's email from the operator-local store, or the
+# LINEAR_OPERATOR_EMAIL env override. Informational (surfaced in the
+# memory block "last touched by" cell); empty if absent.
 config::get_operator_email() {
     config::_require_loaded
-    printf '%s\n' "${CONFIG_VALUES[linear.operator.email]:-}"
+    if [[ -n "${LINEAR_OPERATOR_EMAIL:-}" ]]; then
+        printf '%s\n' "${LINEAR_OPERATOR_EMAIL}"
+        return 0
+    fi
+    printf '%s\n' "${CONFIG_OPERATOR_VALUES[operator.email]:-}"
 }
 
 # config::get_workflow_state_uuid <lifecycle_phase>

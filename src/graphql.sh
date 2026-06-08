@@ -91,9 +91,14 @@ graphql::_log_warn() {
 
 # graphql::_load_api_key
 #
-# Resolve LINEAR_API_KEY. Precedence:
+# Resolve LINEAR_API_KEY via the spec-004 cascade. Precedence:
 #   1. Existing environment variable (set by CI / the GitHub Action).
-#   2. .env file in the current working directory (the local dev path).
+#   2. The operator-local file
+#      (.specify/extensions/linear/linear-operator.local.yml) — lets a
+#      linked worktree authenticate without a per-worktree .env copy
+#      (FR-006, issue #20). Read as a shallow `LINEAR_API_KEY: "..."`
+#      scalar; the file is gitignored so the key never leaks.
+#   3. .env file in the current working directory (the local dev path).
 #
 # The .env load is scoped — we toggle `set -a` only for the duration of the
 # `source` so unrelated variables from .env don't leak into the calling
@@ -107,6 +112,32 @@ graphql::_load_api_key() {
         return 0
     fi
 
+    # Tier 2 — operator-local file. We parse only the LINEAR_API_KEY
+    # scalar (top-level or under any block) with a tolerant grep+sed so we
+    # don't pull the full config loader into the graphql layer. The value
+    # may be quoted (single/double) or bare.
+    local operator_local=".specify/extensions/linear/linear-operator.local.yml"
+    if [[ -f "$operator_local" ]]; then
+        local key_line
+        key_line="$(grep -E '^[[:space:]]*LINEAR_API_KEY[[:space:]]*:' "$operator_local" 2>/dev/null | head -n1 || true)"
+        if [[ -n "$key_line" ]]; then
+            local key_val
+            key_val="$(printf '%s' "$key_line" | sed -E 's/^[[:space:]]*LINEAR_API_KEY[[:space:]]*:[[:space:]]*//')"
+            # Strip surrounding quotes if present.
+            key_val="${key_val%$'\r'}"
+            if [[ "$key_val" == \"*\" ]]; then
+                key_val="${key_val#\"}"; key_val="${key_val%\"}"
+            elif [[ "$key_val" == \'*\' ]]; then
+                key_val="${key_val#\'}"; key_val="${key_val%\'}"
+            fi
+            if [[ -n "$key_val" ]]; then
+                LINEAR_API_KEY="$key_val"
+                export LINEAR_API_KEY
+                return 0
+            fi
+        fi
+    fi
+
     if [[ -f .env ]]; then
         # .env is consumer-supplied and not statically analysable;
         # SC1091 below acknowledges shellcheck cannot follow the source.
@@ -118,7 +149,7 @@ graphql::_load_api_key() {
 
     if [[ -z "${LINEAR_API_KEY:-}" ]]; then
         graphql::_log_error \
-            "LINEAR_API_KEY is not set. Add it to .env or export it before running. See .env.example for guidance."
+            "LINEAR_API_KEY is not set. Add it to .env, the operator-local file (${operator_local}), or export it before running."
         exit 2
     fi
 }

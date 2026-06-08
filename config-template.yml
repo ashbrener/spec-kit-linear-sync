@@ -12,9 +12,24 @@
 # the UUIDs. The seed step (`speckit.linear.seed`, FR-021/FR-032) then
 # populates `linear.workflow_state_uuids`.
 #
-# Commit status: THIS FILE IS COMMITTED (FR-002, Principle V — repo is
-# self-describing; clone + sync should "just work"). Secrets live in
-# `local-config.yml` (gitignored) or env vars, never here.
+# Two-file model (spec 004 — config / identity split):
+#   * THIS FILE — `linear-config.yml` — is COMMITTED. It holds ONLY the
+#     shareable binding (team/project UUIDs, workflow-state + label UUID
+#     maps, behaviour toggles). Cloning the repo gives a collaborator
+#     everything they need to sync; none of it is personal (FR-001,
+#     FR-004, Principle V — repo is self-describing).
+#   * Operator IDENTITY (`user_id`, name, email) lives in a SEPARATE,
+#     gitignored, operator-local file:
+#         `.specify/extensions/linear/linear-operator.local.yml`
+#     It is NEVER committed. `speckit.linear.install` scaffolds it and
+#     ensures `.gitignore` covers `*.local.yml` (FR-002, FR-003).
+#   * Secrets (LINEAR_API_KEY) live in env vars, the operator-local
+#     file, or `.env` (gitignored) — never here.
+#
+# Resolution cascade (both identity and API key): environment →
+# operator-local file → interactive prompt (FR-005, FR-006). Reconcile
+# resolves the operator assignee via this cascade and NEVER reads
+# identity from this committed file.
 #
 # Hand-edit policy: `linear.*.id` (UUIDs) and `linear.workflow_state_uuids`
 # come from `speckit.linear.install` / `speckit.linear.seed`. Do NOT
@@ -22,7 +37,8 @@
 # never by name (FR-032), so a wrong UUID silently breaks sync.
 
 schema_version: 1          # template schema; bump if shape changes
-config_version: 1          # bump if operator hand-edits
+config_version: 2          # spec 004: operator identity moved to the
+                           # operator-local file; bump if operator hand-edits
 
 # Linear binding — resolved at install time (FR-002).
 linear:
@@ -36,16 +52,12 @@ linear:
   project:
     id: "00000000-0000-0000-0000-000000000000"   # Required (FR-002) — UUID is authoritative
     name: "spec-kit-linear"        # informational (display only)
-  # Operator identity — resolved at install time via `viewer { id name email }`
-  # per FR-034. `user_id` is the lookup key (UUID); name/email are
-  # informational, surfaced in the install summary + the spec Issue
-  # memory block. assigneeId on issueCreate is read from user_id;
-  # issueUpdate never passes assigneeId so manual reassignment in
-  # Linear's UI persists across reconciles.
-  operator:
-    user_id: "00000000-0000-0000-0000-000000000000"   # UUID — required (FR-034)
-    name: "Ash Brener"                                 # informational
-    email: "ash@example.com"                           # informational
+  # NOTE: operator identity is intentionally ABSENT from this committed
+  # file (spec 004). `user_id`, name, and email live in the gitignored
+  # operator-local file `linear-operator.local.yml` and resolve via the
+  # env → local-file → prompt cascade (FR-002, FR-005). A legacy config
+  # that still carries an `operator:` block here is migrated out of it
+  # automatically, once, on first load (FR-007).
   # Workflow state UUIDs captured by the seed step (FR-021 + FR-032).
   # Keys are the canonical lifecycle-phase identifiers. Lookup is by
   # UUID, never by name — Linear UI renames are safe; deletion surfaces
@@ -114,8 +126,11 @@ git_hooks:
 #   1. `specify extension add linear`                 # copies this template
 #   2. `cp config-template.yml linear-config.yml`     # rename for the bridge to find it
 #   3. `/spec-kit-linear-install`                      # fills linear.{team,project}.id,
-#                                                     # installs webhook + git hooks,
-#                                                     # registers after_* hooks
+#                                                     # scaffolds linear-operator.local.yml
+#                                                     # (gitignored identity), installs
+#                                                     # webhook + git hooks, registers hooks
 #   4. `/spec-kit-linear-seed`                         # creates workflow states + labels,
 #                                                     # fills workflow_state_uuids
-#   5. Commit `linear-config.yml`. Sync is now live (FR-002, Principle V).
+#   5. Commit `linear-config.yml` (safe — no identity). Sync is now live
+#      (FR-001, FR-004, Principle V). Do NOT commit
+#      `linear-operator.local.yml` — it is gitignored by install.
