@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-06-08 — Config/identity split, team-scoped seeding, faithful projection
+
+Three spec-driven features (specs 004/005/006). `extension.id` stays `linear`;
+the command surface is unchanged. Existing installs migrate automatically.
+
+- **Config / identity split (#38, #20) — spec 004.** `linear-config.yml` now holds
+  only the shareable team/project binding and is safe to commit; your operator
+  identity (`user_id`/name/email) moves to a gitignored operator-local file.
+  Identity and API key resolve via an env → local-file → prompt cascade (no more
+  per-worktree `.env` copies). Legacy single-file configs auto-migrate with a
+  one-time notice. The docs/`.gitignore` contradiction is resolved.
+- **Team-scoped / non-admin seeding (#41) — spec 005.** Seed without
+  workspace-admin: team-scoped label creation, an adopt-existing path (capture
+  UUIDs of states/labels that already exist), graceful permission-error handling,
+  and a `--scope workspace|team` option (default `team`).
+- **Faithful projection (#34, #42) — spec 006.** `push` now accepts `## Phase N`
+  headers with `:`, `—`, `-`, or whitespace separators (was colon-only → silent
+  zero sub-issues), and the Linear issue description inlines the spec's own
+  content (Input + Overview + body, capped with clean-boundary truncation + a
+  full-spec link).
+
+All existing safety guarantees (idempotency, drift-awareness, fail-closed) hold.
+
 ## [0.2.2] — 2026-06-07 — Bug-fix round from community reports
 
 Fixes from the first wave of external issue reports (thanks @davieshq, @rcollette).
