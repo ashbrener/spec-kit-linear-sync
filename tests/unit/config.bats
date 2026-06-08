@@ -584,3 +584,45 @@ EOF
     [ "${status}" -eq 2 ]
     [[ "${output}" == *"tab character"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# config::get_seed_scope (spec 005, FR-005 / FR-013)
+# ---------------------------------------------------------------------------
+
+@test "config::get_seed_scope: absent seed block defaults to team (FR-013)" {
+    # write_valid_config emits no `seed:` block, so this is the pre-005
+    # config shape — the getter must default to `team`.
+    run bash -c "source '${CONFIG_SH}'; config::load '${VALID_YAML}'; config::get_seed_scope"
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "team" ]
+}
+
+@test "config::get_seed_scope: returns the configured value (workspace)" {
+    local cfg="${TEST_TMP}/scope-workspace.yml"
+    write_valid_config "${cfg}"
+    # Insert a seed.scope under linear: (sibling of team:).
+    printf '\nlinear:\n  seed:\n    scope: workspace\n' >> "${cfg}"
+    run bash -c "source '${CONFIG_SH}'; config::load '${cfg}'; config::get_seed_scope"
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "workspace" ]
+}
+
+@test "config::get_seed_scope: returns the configured value (team)" {
+    local cfg="${TEST_TMP}/scope-team.yml"
+    write_valid_config "${cfg}"
+    printf '\nlinear:\n  seed:\n    scope: team\n' >> "${cfg}"
+    run bash -c "source '${CONFIG_SH}'; config::load '${cfg}'; config::get_seed_scope"
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "team" ]
+}
+
+@test "config::get_seed_scope: invalid value halts with an actionable hint" {
+    local cfg="${TEST_TMP}/scope-bad.yml"
+    write_valid_config "${cfg}"
+    printf '\nlinear:\n  seed:\n    scope: org\n' >> "${cfg}"
+    run bash -c "source '${CONFIG_SH}'; config::load '${cfg}'; config::get_seed_scope"
+    [ "${status}" -eq 2 ]
+    [[ "${output}" == *"invalid value 'org'"* ]]
+    [[ "${output}" == *"workspace"* ]]
+    [[ "${output}" == *"team"* ]]
+}

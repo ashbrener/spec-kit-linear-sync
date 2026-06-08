@@ -486,3 +486,167 @@ graphql::mutate() {
     operation_json="$(graphql::_build_operation "$mutation" "$variables")"
     graphql::_request "$operation_json"
 }
+
+# ---------------------------------------------------------------------------
+# Non-fatal classified mutate (spec 005 — team-scoped / non-admin seeding)
+# ---------------------------------------------------------------------------
+# graphql::mutate and graphql::query EXIT on auth/4xx/GraphQL failure —
+# the correct fail-closed contract for the reconcile path. The seed step's
+# adopt-fallback (spec 005, FR-004/FR-006) needs to CATCH a permission or
+# limit failure and re-route to the adopt-existing path rather than die.
+# graphql::mutate_capture is a purely-additive, non-fatal sibling that
+# classifies the outcome and hands the classification back to the caller.
+#
+# The API key stays inside THIS module (Principle VI — keys-at-the-edges);
+# mutate_capture builds the same envelope and runs the same transport as
+# the fatal path, it just translates errors into data instead of exits.
+
+# graphql::_classify_error <http_status> <body>
+#
+# Map an HTTP status + response body to one of:
+#   permission — 401/403, or a GraphQL error whose code/type/message
+#                indicates a permission / authorization / admin gap.
+#   limit      — 429, or a GraphQL error indicating a rate / usage limit.
+#   graphql    — any other GraphQL errors[] on a 2xx response.
+#   transport  — 5xx / unparseable / unexpected status.
+# The classification is deliberately conservative: ambiguous failures
+# fall through to `graphql` / `transport` (the existing fail-closed
+# classes), never to `permission`/`limit`, so the seed adopt-fallback is
+# only triggered by an unmistakable permission/limit signal (spec
+# Assumption: ambiguous failures keep the fail-closed behaviour).
+graphql::_classify_error() {
+    local status="$1"
+    local body="${2:-}"
+
+    # Lower-cased haystack of the first error message + any code/type
+    # fields, for keyword matching. jq is already a hard dependency.
+    local needle
+    needle="$(
+        printf '%s' "$body" \
+            | jq -r '
+                [ (.errors // [])[]?
+                  | (.message // ""),
+                    (.extensions.code // ""),
+                    (.extensions.type // ""),
+                    (.extensions.userPresentableMessage // "")
+                ] | join(" ")
+              ' 2>/dev/null \
+            | tr '[:upper:]' '[:lower:]' \
+            || true
+    )"
+
+    case "$status" in
+        401|403)
+            printf 'permission'
+            return 0
+            ;;
+        429)
+            printf 'limit'
+            return 0
+            ;;
+    esac
+
+    # Keyword classification of the GraphQL error text (covers the case
+    # where Linear returns HTTP 200 or 400 with a permission/limit error
+    # in the errors[] body rather than the matching HTTP status).
+    case "$needle" in
+        *forbidden*|*"not authorized"*|*unauthorized*|*"access denied"*|*permission*|*"admin"*)
+            printf 'permission'
+            return 0
+            ;;
+        *"rate limit"*|*ratelimited*|*"limit exceeded"*|*"too many"*|*"usage limit"*)
+            printf 'limit'
+            return 0
+            ;;
+    esac
+
+    case "$status" in
+        2*) printf 'graphql' ;;   # 2xx with errors[] but no perm/limit signal
+        5*) printf 'transport' ;;
+        *)  printf 'transport' ;;
+    esac
+}
+
+# graphql::mutate_capture <mutation_string> <variables_json>
+#
+# Issue a mutation WITHOUT exiting on failure. ALWAYS returns 0. Prints a
+# single-line JSON envelope on stdout that the caller inspects with jq:
+#
+#   { "ok": true,  "class": "ok",         "response": { …full envelope… } }
+#   { "ok": false, "class": "permission", "message": "…" }
+#   { "ok": false, "class": "limit",      "message": "…" }
+#   { "ok": false, "class": "graphql",    "message": "…" }
+#   { "ok": false, "class": "transport",  "message": "…" }
+#
+# Implementation: we reuse the exact same auth + transport as the fatal
+# path by calling graphql::mutate inside a command substitution. Because
+# graphql::mutate's `exit N` only kills the $(...) subshell, the outer
+# call captures the non-zero status here and re-classifies it from the
+# HTTP probe rather than letting it propagate. To classify accurately we
+# run a lightweight raw POST and inspect the status + body ourselves.
+graphql::mutate_capture() {
+    if (( $# < 1 )); then
+        graphql::_log_error "graphql::mutate_capture requires a mutation string"
+        printf '%s' '{"ok":false,"class":"transport","message":"missing mutation string"}'
+        return 0
+    fi
+    local mutation="$1"
+    local variables="${2:-}"
+
+    # Malformed variables JSON — surface as transport-class (a caller bug,
+    # not a permission gap), non-fatal.
+    if [[ -n "$variables" ]] && ! printf '%s' "$variables" | jq -e . >/dev/null 2>&1; then
+        printf '%s' '{"ok":false,"class":"transport","message":"variables argument is not valid JSON"}'
+        return 0
+    fi
+    if [[ -z "$variables" ]]; then
+        variables='{}'
+    fi
+
+    local operation_json
+    operation_json="$(graphql::_build_operation "$mutation" "$variables")"
+
+    graphql::_load_api_key
+
+    local header_file
+    header_file="$(mktemp -t spec-kit-linear-graphql.XXXXXX)"
+    # shellcheck disable=SC2064
+    trap "rm -f '${header_file}'" RETURN
+
+    local response_raw curl_rc=0
+    response_raw="$(graphql::_post "$operation_json" "$header_file")" || curl_rc=$?
+
+    if (( curl_rc != 0 )); then
+        jq -nc --arg msg "curl transport failure (rc=${curl_rc})" \
+            '{ok:false, class:"transport", message:$msg}'
+        return 0
+    fi
+
+    local status_code body
+    status_code="$(printf '%s' "$response_raw" | tail -n1)"
+    body="$(printf '%s' "$response_raw" | sed '$d')"
+
+    graphql::_check_rate_limit "$header_file"
+
+    if ! [[ "$status_code" =~ ^[0-9]{3}$ ]]; then
+        jq -nc --arg msg "unparseable HTTP status from Linear ('${status_code}')" \
+            '{ok:false, class:"transport", message:$msg}'
+        return 0
+    fi
+
+    # 2xx with no errors[] — success.
+    if [[ "$status_code" =~ ^2 ]] \
+        && ! printf '%s' "$body" | jq -e '.errors and (.errors | length > 0)' >/dev/null 2>&1; then
+        jq -nc --argjson resp "$body" '{ok:true, class:"ok", response:$resp}'
+        return 0
+    fi
+
+    # Any failure path — classify it.
+    local class
+    class="$(graphql::_classify_error "$status_code" "$body")"
+    local msg
+    msg="$(printf '%s' "$body" | jq -r '.errors[0].message? // .message? // "<no error message>"' 2>/dev/null || printf 'HTTP %s' "$status_code")"
+    jq -nc --arg class "$class" --arg msg "$msg" --arg status "$status_code" \
+        '{ok:false, class:$class, message:("HTTP " + $status + ": " + $msg)}'
+    return 0
+}

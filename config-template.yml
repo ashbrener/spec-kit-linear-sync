@@ -96,6 +96,20 @@ linear:
   agent_label_uuids:
     claude:         "00000000-0000-0000-0000-000000000000"   # FR-036 — set by seed
     codex:          "00000000-0000-0000-0000-000000000000"   # FR-036 — set by seed
+  # Seed scope (spec 005 — team-scoped / non-admin seeding, FR-005).
+  # Controls the breadth at which `/spec-kit-linear-seed` creates labels:
+  #   * team      — labels created scoped to the team above (teamId set).
+  #                 Needs ONLY team-level permission, so a sub-team owner
+  #                 can seed without workspace-admin. THE DEFAULT.
+  #   * workspace — labels created workspace-wide (teamId omitted). Needs
+  #                 workspace-admin. The pre-005 behaviour.
+  # Whatever the scope, if a required state/label cannot be CREATED (no
+  # permission) but already EXISTS, seed ADOPTS it by name and captures
+  # its UUID — needing zero create permission. Omitting this block (or the
+  # whole `seed:` key) keeps the default `team` so a pre-005 config works
+  # unedited. Override per-run with `/spec-kit-linear-seed --scope <…>`.
+  seed:
+    scope: team   # workspace | team   (default: team)
 
 # Behavior toggles — operator-tweakable.
 sync:

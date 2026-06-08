@@ -109,6 +109,24 @@ readonly -a CONFIG_AGENT_FAMILIES=(
     "codex"
 )
 
+# Seed scope (spec 005 — team-scoped / non-admin seeding, FR-005). The
+# breadth at which the seed step creates labels:
+#   * workspace — labels created workspace-scoped (teamId omitted);
+#                 requires workspace-admin. Today's pre-005 behaviour.
+#   * team      — labels created scoped to the configured team (teamId
+#                 supplied); requires only team-level permission so a
+#                 sub-team owner can seed without workspace-admin.
+# Default is `team` (with auto-fallback to adopt-existing on a
+# permission/limit failure) — the configuration that lets the broadest
+# set of operators succeed (spec Assumptions). An absent `linear.seed`
+# block resolves to this default so a pre-005 config keeps working
+# unedited (FR-013).
+readonly CONFIG_SEED_SCOPE_DEFAULT="team"
+readonly -a CONFIG_SEED_SCOPES=(
+    "workspace"
+    "team"
+)
+
 # ---------------------------------------------------------------------------
 # Internal helpers.
 # ---------------------------------------------------------------------------
@@ -652,6 +670,37 @@ hint: run \`/spec-kit-linear-seed\` to create the agent:* labels and capture the
     # return empty. The reconciler's _resolve_agent_label_id helper will
     # treat this as "no canonical UUID; fall back to lazy-create by name".
     printf '%s\n' "${CONFIG_VALUES[linear.agent_label_uuids.${family}]:-}"
+}
+
+# config::get_seed_scope
+# Echo the configured seed scope (spec 005, FR-005): one of `workspace`
+# or `team`. Resolution:
+#   * `linear.seed.scope` present + valid ⇒ echo it.
+#   * block absent (pre-005 config) ⇒ echo the default `team` (FR-013 —
+#     an old config keeps working without an edit).
+#   * present but NOT one of the allowed values ⇒ halt (exit 2) with an
+#     actionable hint (Principle VIII — surface, don't silently coerce).
+# Lookups are non-interactive; the seed step's `--scope` flag overrides
+# this getter (precedence handled in seed::resolve_scope).
+config::get_seed_scope() {
+    config::_require_loaded
+
+    local value="${CONFIG_VALUES[linear.seed.scope]:-}"
+    if [[ -z "${value}" ]]; then
+        printf '%s\n' "${CONFIG_SEED_SCOPE_DEFAULT}"
+        return 0
+    fi
+
+    local candidate
+    for candidate in "${CONFIG_SEED_SCOPES[@]}"; do
+        if [[ "${candidate}" == "${value}" ]]; then
+            printf '%s\n' "${value}"
+            return 0
+        fi
+    done
+
+    config::_die "${CONFIG_LOADED_PATH}: linear.seed.scope: invalid value '${value}'
+hint: valid values are ${CONFIG_SEED_SCOPES[*]} (default: ${CONFIG_SEED_SCOPE_DEFAULT})"
 }
 
 # config::validate
