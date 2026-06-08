@@ -2167,6 +2167,91 @@ reconcile::_mapped_ensure_issue() {
     printf '%s' "$new_id"
 }
 
+# reconcile::_state_ordinal_key <todo|in_progress|done>
+#   Map a disk-derived sub-issue state key to an ordinal (todo=0 < in_progress=1
+#   < done=2) for the mapped-path drift comparison.
+reconcile::_state_ordinal_key() {
+    case "$1" in
+        done)        printf '2' ;;
+        in_progress) printf '1' ;;
+        *)           printf '0' ;;
+    esac
+}
+
+# reconcile::_state_ordinal_type <linear state.type>
+#   Map a Linear workflow-state `type` to the same ordinal scale. Only
+#   `started` (1) and `completed` (2) count as "advanced"; everything else
+#   (backlog/unstarted/triage/canceled) is 0 so a cancelled or backlog phase
+#   never spuriously reads as "ahead" of disk.
+reconcile::_state_ordinal_type() {
+    case "$1" in
+        completed) printf '2' ;;
+        started)   printf '1' ;;
+        *)         printf '0' ;;
+    esac
+}
+
+# reconcile::_mapped_compute_drift <project_id> <spec_dir> <feature_number> \
+#                                  <disk_lifecycle>
+#   Backward-drift verdict for a #17 spec→Project, anchored on the spec's
+#   phase Issues (FR-010). For each task phase, compare the phase Issue's
+#   CURRENT Linear workflow state (read before this run writes) against the
+#   disk-derived state (subissue_state_key from task checkboxes). If ANY phase
+#   Issue is further along in Linear than on disk, Linear is ahead → drift
+#   fires. This is independent + non-spurious: the bridge writes phase states
+#   FROM disk, so an unchanged re-run reads Linear == disk and fires nothing
+#   (idempotent, SC-017); only an out-of-band advance (manual edit / future
+#   automation) trips it. Emits a verdict line in compute_drift's format so the
+#   existing _emit_drift_warning + _drift_disposition machinery is reused
+#   verbatim. PURE-ish: one read-only query, no writes.
+reconcile::_mapped_compute_drift() {
+    local project_id="$1" spec_dir="$2" feature_number="$3" disk_lifecycle="$4"
+    : "${feature_number:-}"
+    local tasks_md="${spec_dir%/}/tasks.md"
+
+    local query='query MappedPhaseStates($pid: ID!) {
+        issues(filter: { project: { id: { eq: $pid } } }, first: 250) {
+            nodes { id state { type } labels { nodes { name } } }
+        }
+    }'
+    local vars resp
+    vars="$(jq -nc --arg pid "$project_id" '{pid: $pid}')"
+    if ! resp="$(graphql::query "$query" "$vars" 2>/dev/null)"; then
+        # Unreadable Linear → treat as no-drift here; the caller's own
+        # fail-closed policy (if any) governs the run.
+        printf 'fired=0 phase_drift=0 recency_drift=0 signals= disk=%s linear=\n' "${disk_lifecycle:-}"
+        return 0
+    fi
+
+    local fired=0 ahead_detail='' idx name
+    while IFS=$'\t' read -r idx name; do
+        : "${name:-}"
+        [[ -n "$idx" ]] || continue
+        local disk_key disk_ord lin_type lin_ord
+        disk_key="$(reconcile::subissue_state_key "$tasks_md" "$idx")"
+        disk_ord="$(reconcile::_state_ordinal_key "$disk_key")"
+        lin_type="$(printf '%s' "$resp" | jq -r --arg l "task-phase:${idx}" '
+            [ .data.issues.nodes[]? | select(any(.labels.nodes[]?; .name == $l)) ][0].state.type // ""')"
+        [[ -n "$lin_type" ]] || continue
+        lin_ord="$(reconcile::_state_ordinal_type "$lin_type")"
+        if (( lin_ord > disk_ord )); then
+            fired=1
+            if [[ -n "$ahead_detail" ]]; then
+                ahead_detail="${ahead_detail},phase${idx}"
+            else
+                ahead_detail="phase${idx}"
+            fi
+        fi
+    done < <(parser::task_phases "$tasks_md")
+
+    if (( fired == 1 )); then
+        printf 'fired=1 phase_drift=1 recency_drift=0 signals=phase_ordering disk=%s linear=%s\n' \
+            "${disk_lifecycle:-}" "${ahead_detail} ahead in Linear"
+    else
+        printf 'fired=0 phase_drift=0 recency_drift=0 signals= disk=%s linear=\n' "${disk_lifecycle:-}"
+    fi
+}
+
 # reconcile::_repo_slug
 #   Echo a stable, filesystem-derived repo slug for the repo-level identity
 #   marker (the git toplevel basename, falling back to PWD). Never minted from
@@ -2226,6 +2311,32 @@ reconcile::process_spec_mapped() {
     repo_slug="$(reconcile::_repo_slug)"
     spec_content="$(reconcile::render_spec_content_block "$spec_dir" 2>/dev/null || true)"
 
+    # --- backward-drift pre-check (FR-010, Principle IV) ------------------
+    # READ-ONLY, before any write: if the spec Project already exists, compare
+    # its phase Issues' current Linear states against disk (the spec-level
+    # anchor). On a fire, surface the WARNING (reusing the default machinery)
+    # and resolve the disposition; an operator/flag abort leaves Linear
+    # unchanged (FR-057). The L0 Initiative is never a drift surface (FR-010).
+    local mapped_existing_proj
+    mapped_existing_proj="$(reconcile::query_project_by_marker "speckit-spec:${feature_number}" "$team_id" 2>/dev/null)" || mapped_existing_proj=""
+    if [[ -n "$mapped_existing_proj" && "$mapped_existing_proj" != "null" ]]; then
+        local mapped_pid mapped_disk_phase mapped_pr_hint mapped_verdict
+        mapped_pid="$(printf '%s' "$mapped_existing_proj" | jq -r '.id // ""')"
+        mapped_pr_hint="$(reconcile::pr_state_hint "$(git_helpers::pr_state "${feature_number}-${short_name}" 2>/dev/null || true)")"
+        mapped_disk_phase="$(parser::lifecycle_phase "$spec_dir" "$mapped_pr_hint" 2>/dev/null || true)"
+        if [[ -n "$mapped_pid" ]]; then
+            mapped_verdict="$(reconcile::_mapped_compute_drift "$mapped_pid" "$spec_dir" "$feature_number" "$mapped_disk_phase")"
+            if [[ "$(reconcile::_drift_verdict_field "$mapped_verdict" fired)" == "1" ]]; then
+                reconcile::_emit_drift_warning "$feature_number" "$mapped_verdict"
+                if [[ "$(reconcile::_drift_disposition "$feature_number" "$mapped_verdict")" == "abort" ]]; then
+                    summary::add skipped "spec ${feature_number} skipped by operator (backward-drift abort) — Linear unchanged"
+                    reconcile::log "spec ${feature_number}: mapped drift disposition=abort; skipping write (Linear unchanged)"
+                    return 0
+                fi
+            fi
+        fi
+    fi
+
     # repo → Initiative (the above-Project container).
     local initiative_id
     initiative_id="$(reconcile::ensure_initiative "speckit-repo:${repo_slug}" "${repo_slug}" "")"
@@ -2280,9 +2391,6 @@ reconcile::process_spec_mapped() {
         done < <(parser::tasks_in_phase "$tasks_md" "$idx")
     done < <(parser::task_phases "$tasks_md")
 
-    # The mapped-path backward-drift anchor (recency on the spec Project,
-    # FR-010) is the final sub-increment; surface that it is not yet active.
-    summary::add warned "spec ${feature_number}: #17 mapping projected (Initiative → Project → Issue → sub-issue); the mapped-path backward-drift anchor lands in the next increment"
     reconcile::log "spec ${feature_number}: mapped #17 projection complete (project=${project_id})"
     return 0
 }

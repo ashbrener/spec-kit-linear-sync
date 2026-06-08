@@ -301,3 +301,42 @@ EOF
     grep -q "MEI task-phase:1 parent=$" "${CALLS}"                              # phase → Issue, no parent
     grep -q "MEI speckit-task:T001 parent=issue-task-phase:1" "${CALLS}"        # task → sub-issue under the phase Issue
 }
+
+# ---------------------------------------------------------------------------
+# _mapped_compute_drift — phase-Issue-aggregate backward-drift (FR-010)
+# ---------------------------------------------------------------------------
+
+@test "_mapped_compute_drift fires when a phase Issue is ahead of disk" {
+    _write_17_config_and_spec
+    # Disk: phase 1 has one UNCHECKED task → disk state = todo (ordinal 0).
+    printf '## Phase 1: Setup\n- [ ] T001 Do the thing\n' > "${SPEC_DIR}/tasks.md"
+    # Linear: the phase-1 Issue is `completed` (ordinal 2) → ahead → fire.
+    export Q_RESP='{"data":{"issues":{"nodes":[{"id":"i1","state":{"type":"completed"},"labels":{"nodes":[{"name":"task-phase:1"}]}}]}}}'
+    run bash -c '
+        source "${RECONCILE_SH}" 2>/dev/null
+        reconcile::log() { :; }; summary::add() { :; }
+        config::load "${CFG}"
+        graphql::query() { printf "%s" "$Q_RESP"; }
+        v="$(reconcile::_mapped_compute_drift proj-1 "${SPEC_DIR}" 007 implementing)"
+        reconcile::_drift_verdict_field "$v" fired
+    '
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "1" ]
+}
+
+@test "_mapped_compute_drift is silent when Linear matches disk (idempotent)" {
+    _write_17_config_and_spec
+    printf '## Phase 1: Setup\n- [ ] T001 Do the thing\n' > "${SPEC_DIR}/tasks.md"
+    # Disk = todo; Linear phase-1 Issue is `unstarted` (ordinal 0) → equal → no fire.
+    export Q_RESP='{"data":{"issues":{"nodes":[{"id":"i1","state":{"type":"unstarted"},"labels":{"nodes":[{"name":"task-phase:1"}]}}]}}}'
+    run bash -c '
+        source "${RECONCILE_SH}" 2>/dev/null
+        reconcile::log() { :; }; summary::add() { :; }
+        config::load "${CFG}"
+        graphql::query() { printf "%s" "$Q_RESP"; }
+        v="$(reconcile::_mapped_compute_drift proj-1 "${SPEC_DIR}" 007 implementing)"
+        reconcile::_drift_verdict_field "$v" fired
+    '
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "0" ]
+}
