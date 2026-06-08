@@ -407,3 +407,35 @@ EOF
     ! grep -q "^INIT" "${CALLS}"                                     # no Initiative created
     ! grep -q "^LINK" "${CALLS}"
 }
+
+# ---------------------------------------------------------------------------
+# dry-run placeholder guards (regression for the live-dogfood finding)
+# ---------------------------------------------------------------------------
+
+@test "_mapped_ensure_issue in dry-run with a placeholder project skips the query" {
+    run bash -c '
+        source "${RECONCILE_SH}" 2>/dev/null
+        reconcile::log() { :; }; summary::add() { :; }
+        ARG_DRY_RUN=1
+        config::get_team_id() { printf "team-uuid"; }
+        graphql::query() { echo "QUERY" >> "$CALLS"; printf "%s" "{}"; }
+        graphql::mutate() { echo "MUTATE" >> "$CALLS"; printf "%s" "{}"; }
+        reconcile::_mapped_ensure_issue "task-phase:1" "dry-run-project-id" "T" "d" "" ""
+    '
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "dry-run-issue-task-phase:1" ]
+    [ ! -s "${CALLS}" ]   # no real query/mutate against a placeholder id
+}
+
+@test "link_project_to_initiative in dry-run with placeholder ids skips the query" {
+    run bash -c '
+        source "${RECONCILE_SH}" 2>/dev/null
+        reconcile::log() { :; }; summary::add() { :; }
+        ARG_DRY_RUN=1
+        graphql::query() { echo "QUERY" >> "$CALLS"; printf "%s" "{}"; }
+        graphql::mutate() { echo "MUTATE" >> "$CALLS"; printf "%s" "{}"; }
+        reconcile::link_project_to_initiative "dry-run-project-id" "dry-run-initiative-id"
+    '
+    [ "${status}" -eq 0 ]
+    [ ! -s "${CALLS}" ]
+}
