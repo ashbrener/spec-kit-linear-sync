@@ -30,6 +30,72 @@
 # the entry point, not in every library).
 
 # ---------------------------------------------------------------------------
+# PARSER_PHASE_HEADER_AWK — shared awk prologue defining split_phase_header().
+#
+# Single source of truth for the broadened task-phase header grammar
+# (#34 / FR-001..FR-006). Prepended to every awk program that needs to
+# recognise `## Phase N <sep> <Name>` so phase enumeration, per-phase
+# task collection, and the near-miss diagnostic all agree on exactly
+# which headers parse (FR-003 — no path left on the colon-only grammar).
+#
+# split_phase_header(line, out) populates the `out` array:
+#   out["ok"]   = 1 if `line` is a parseable phase header, else 0
+#   out["idx"]  = the phase number (digit run) when ok==1
+#   out["name"] = the trimmed phase name when ok==1 (may be "")
+#
+# Grammar: `^## Phase <N>` where <N> is a digit run, optionally followed
+# by a separator (`:`, em-dash `—`, or hyphen `-`) and/or whitespace and
+# a name. A header whose digit run is immediately followed by a non-
+# separator, non-whitespace character (e.g. `## Phase 1Setup`) or whose
+# number is a word (`## Phase one`) does NOT parse (out["ok"]=0) and is
+# left for the near-miss diagnostic (FR-004).
+#
+# The em-dash (U+2014, a 3-byte UTF-8 sequence) is matched as a LITERAL
+# string, never inside a bracket character class — a bracket class
+# matches only ONE byte under the C/POSIX locale, which would leak the
+# remaining em-dash bytes into the name (locale-fragility bug). Stripping
+# it as a literal keeps the result identical across locales.
+# ---------------------------------------------------------------------------
+readonly PARSER_PHASE_HEADER_AWK='
+    function split_phase_header(line, out,    rest, emdash) {
+        out["ok"] = 0
+        out["idx"] = ""
+        out["name"] = ""
+        # Must start with the literal "## Phase " prefix then a digit run.
+        if (line !~ /^## Phase [0-9]+/) return
+        rest = line
+        sub(/^## Phase /, "", rest)
+        match(rest, /^[0-9]+/)
+        out["idx"] = substr(rest, 1, RLENGTH)
+        rest = substr(rest, RLENGTH + 1)
+        # After the number must come: end-of-line, whitespace, ":", "-",
+        # or the em-dash. Anything else (e.g. "Setup" glued to the digit)
+        # is NOT a phase header.
+        emdash = sprintf("%c%c%c", 226, 128, 148)   # U+2014 em-dash, UTF-8
+        if (rest != "" \
+            && rest !~ /^[[:space:]]/ \
+            && rest !~ /^:/ \
+            && rest !~ /^-/ \
+            && substr(rest, 1, 3) != emdash) {
+            return
+        }
+        # Drop one leading separator (em-dash literal first, then ":" or
+        # "-") plus surrounding whitespace; bare-whitespace headers have
+        # no separator char and fall through to the trim alone (FR-006).
+        sub(/^[[:space:]]+/, "", rest)
+        if (substr(rest, 1, 3) == emdash) {
+            rest = substr(rest, 4)
+        } else {
+            sub(/^[:-]/, "", rest)
+        }
+        sub(/^[[:space:]]+/, "", rest)
+        sub(/[[:space:]]+$/, "", rest)
+        out["name"] = rest
+        out["ok"] = 1
+    }
+'
+
+# ---------------------------------------------------------------------------
 # parser::feature_number <spec_dir>
 #
 # Extracts the leading 3-digit feature number from the spec directory's
@@ -188,28 +254,29 @@ parser::lifecycle_phase() {
 # ---------------------------------------------------------------------------
 # parser::task_phases <tasks_md_path>
 #
-# Emits one line per `## Phase N: <Name>` heading found in tasks.md,
-# formatted `<N>\t<Name>`. Both `## Phase 1: Setup` and
-# `## Phase 10: Polish` are accepted; the name is trimmed of leading
-# and trailing whitespace. No output if the file is absent or has no
-# matching headings (caller infers "no task phases yet").
+# Emits one line per `## Phase N <sep> <Name>` heading found in
+# tasks.md, formatted `<N>\t<Name>`. The separator <sep> between the
+# phase number and the name may be a colon (`:`), an em-dash (`—`), a
+# hyphen (`-`), or bare whitespace (#34 / FR-001); the SAME phase number
+# and trimmed name are extracted in every case, so the canonical
+# spec-kit em-dash form (`## Phase 1 — Setup`) produces the identical
+# result to the colon form (`## Phase 1: Setup`). Both `## Phase 1` and
+# `## Phase 10` (single- and multi-digit) are accepted; the name is
+# trimmed of leading/trailing whitespace and of whitespace around the
+# separator (FR-006). A header with no name (`## Phase 1` or
+# `## Phase 1 —`) yields the number with an empty name (FR-001 edge
+# case). No output if the file is absent or has no matching headings
+# (caller infers "no task phases yet").
 # ---------------------------------------------------------------------------
 parser::task_phases() {
     local tasks_md="$1"
     [[ -f "$tasks_md" ]] || return 0
-    awk '
-        /^## Phase [0-9]+:/ {
-            line = $0
-            # Strip the leading "## Phase " prefix.
-            sub(/^## Phase /, "", line)
-            # Index of ":" splits "<N>" from "<Name>".
-            colon = index(line, ":")
-            if (colon == 0) next
-            idx = substr(line, 1, colon - 1)
-            name = substr(line, colon + 1)
-            sub(/^[[:space:]]+/, "", name)
-            sub(/[[:space:]]+$/, "", name)
-            printf "%s\t%s\n", idx, name
+    awk "$PARSER_PHASE_HEADER_AWK"'
+        {
+            split_phase_header($0, parsed)
+            if (parsed["ok"] == 1) {
+                printf "%s\t%s\n", parsed["idx"], parsed["name"]
+            }
         }
     ' "$tasks_md"
 }
@@ -220,7 +287,11 @@ parser::task_phases() {
 # Emits one line per task belonging to phase `<phase_index>`, formatted
 # `<TaskID>\t<checked|unchecked>\t<description>\t<estimate>`. Tasks are
 # checklist items (`- [ ]` / `- [x]`) appearing between the matching
-# `## Phase N:` heading and the next `## ` heading. Task ID is the
+# `## Phase N <sep> <Name>` heading (any separator — colon, em-dash,
+# hyphen, or whitespace, FR-001/FR-003) and the next `## ` heading. The
+# matching phase number is extracted identically to parser::task_phases,
+# so a phase selected by index works regardless of separator style. Task
+# ID is the
 # first whitespace-separated token after the checkbox; description is
 # the remainder of the line (any trailing whitespace trimmed).
 #
@@ -242,14 +313,17 @@ parser::tasks_in_phase() {
     local tasks_md="$1"
     local phase_index="$2"
     [[ -f "$tasks_md" ]] || return 0
-    awk -v want="$phase_index" '
-        /^## Phase [0-9]+:/ {
-            line = $0
-            sub(/^## Phase /, "", line)
-            colon = index(line, ":")
-            if (colon == 0) { in_phase = 0; next }
-            idx = substr(line, 1, colon - 1)
-            in_phase = (idx == want) ? 1 : 0
+    awk -v want="$phase_index" "$PARSER_PHASE_HEADER_AWK"'
+        /^## Phase / {
+            split_phase_header($0, parsed)
+            if (parsed["ok"] == 1) {
+                in_phase = (parsed["idx"] == want) ? 1 : 0
+                next
+            }
+            # A "## Phase ..." line that is NOT a parseable header
+            # (e.g. "## Phase one") still closes any open phase, exactly
+            # as the generic "## " heading rule below would.
+            in_phase = 0
             next
         }
         /^## / { in_phase = 0; next }
@@ -350,16 +424,23 @@ parser::spec_estimate() {
 # parser::malformed_task_lines <tasks_md_path>
 #
 # Emits one line per checklist task line (`- [ ]` / `- [x]`) that
-# appears OUTSIDE any `## Phase N:` heading. Lines are emitted with
-# their 1-indexed source line number first, then a tab, then the
-# verbatim line — useful for warning messages per FR-024 and SC-007.
-# Empty output when every task line lives under some `## Phase`.
+# appears OUTSIDE any `## Phase N <sep> <Name>` heading (any separator —
+# colon, em-dash, hyphen, or whitespace, FR-001/FR-003). Lines are
+# emitted with their 1-indexed source line number first, then a tab,
+# then the verbatim line — useful for warning messages per FR-024 and
+# SC-007. Empty output when every task line lives under some `## Phase`.
+# A `## Phase` line that is not a parseable header (e.g. `## Phase one`)
+# does NOT open a phase, so tasks under it are correctly flagged.
 # ---------------------------------------------------------------------------
 parser::malformed_task_lines() {
     local tasks_md="$1"
     [[ -f "$tasks_md" ]] || return 0
-    awk '
-        /^## Phase [0-9]+:/ { in_phase = 1; next }
+    awk "$PARSER_PHASE_HEADER_AWK"'
+        /^## Phase / {
+            split_phase_header($0, parsed)
+            in_phase = (parsed["ok"] == 1) ? 1 : 0
+            next
+        }
         /^## / { in_phase = 0; next }
         !in_phase && /^- \[[ xX]\][[:space:]]/ {
             printf "%d\t%s\n", NR, $0
@@ -371,30 +452,40 @@ parser::malformed_task_lines() {
 # parser::phase_header_near_misses <tasks_md_path>
 #
 # Emits one line per heading that LOOKS like a task-phase header
-# (`^## Phase <N>`) but is REJECTED by the strict colon parser used by
-# parser::task_phases / parser::tasks_in_phase (which require
-# `^## Phase <N>:`). Lines are emitted with their 1-indexed source line
-# number first, then a tab, then the verbatim line.
+# (`^## Phase ...`) but is REJECTED by the broadened parser used by
+# parser::task_phases / parser::tasks_in_phase — i.e. a `## Phase` line
+# from which no phase NUMBER can be extracted (FR-004). Lines are
+# emitted with their 1-indexed source line number first, then a tab,
+# then the verbatim line.
 #
-# These are the silent killers: a header like `## Phase 1 — Setup`
-# (em-dash), `## Phase 1 - Setup` (hyphen), or `## Phase 1 Setup`
-# (bare) matches the colon parser NOTHING, so zero task-phase
-# sub-issues are created with no other diagnostic. The caller turns a
-# non-empty result into a near-miss WARNING so the 0-sub-issue case is
-# loud rather than silent.
+# After #34 broadened the grammar, the canonical separators (colon,
+# em-dash, hyphen, bare whitespace) ALL parse, so they are NO LONGER
+# near-misses (FR-005). The residue this still flags is genuinely
+# unparseable lines: a worded number (`## Phase one: Setup`), no number
+# at all (`## Phase: Setup`), or a digit glued to the name with no
+# separator (`## Phase 1Setup`). The caller turns a non-empty result
+# into a near-miss WARNING so the 0-sub-issue case is loud rather than
+# silent (#45's safety net, narrowed per FR-005).
 #
-# NOTE: this is a DIAGNOSTIC only — it does NOT broaden the accepted
-# phase-header grammar (still colon-only per FR-005). Empty output when
-# every `## Phase <N>` heading already uses the canonical colon form.
+# NOTE: this is a DIAGNOSTIC only. It shares split_phase_header() with
+# the real parser (PARSER_PHASE_HEADER_AWK) so the set of "accepted"
+# headers and the set of "near-miss" headers can never disagree
+# (FR-003/FR-005).
 # ---------------------------------------------------------------------------
 parser::phase_header_near_misses() {
     local tasks_md="$1"
     [[ -f "$tasks_md" ]] || return 0
-    awk '
-        # A header that starts "## Phase <N>" but is NOT the strict
-        # "## Phase <N>:" form the parser actually consumes.
-        /^## Phase [0-9]+/ && !/^## Phase [0-9]+:/ {
-            printf "%d\t%s\n", NR, $0
+    awk "$PARSER_PHASE_HEADER_AWK"'
+        # A line that LOOKS like a phase header — "## Phase" followed by
+        # whitespace, a ":" (e.g. "## Phase: Setup"), or end-of-line —
+        # but does NOT parse to a phase number+name under the broadened
+        # grammar (FR-004). "## Phaseout" and similar non-headers are
+        # excluded by requiring the separator/boundary after "Phase".
+        /^## Phase([[:space:]:]|$)/ {
+            split_phase_header($0, parsed)
+            if (parsed["ok"] == 0) {
+                printf "%d\t%s\n", NR, $0
+            }
         }
     ' "$tasks_md"
 }
