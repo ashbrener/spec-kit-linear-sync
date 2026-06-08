@@ -99,27 +99,18 @@ source "${SCRIPT_DIR}/parser.sh"
 # every consumer repo's invocation.
 readonly RECONCILE_CONFIG_PATH_DEFAULT=".specify/extensions/linear/linear-config.yml"
 
-# Cap on the verbatim Overview body before we truncate to the first
-# paragraph (split on `\n\n`) + ellipsis. Linear descriptions are
-# already long with the memory block; keeping this under
-# 1500 chars preserves the at-a-glance value the block is meant to add.
-readonly RECONCILE_OVERVIEW_MAX_CHARS=1500
-
 # Cap on the TOTAL inlined spec-content body (#42 / FR-008, FR-010).
 # The bridge inlines the spec's own authored content — its `**Input**`
 # line, its `## Overview`, and additional body sections in document
 # order — so a Linear Issue born from a rich spec file is self-contained
 # (the operator does not have to leave Linear to read what they wrote).
-# Reuses the existing description/Overview cap convention (Assumptions):
-# the per-section Overview cap above stays at 1500 for the at-a-glance
-# pointer; this larger total cap bounds the full inlined body so the
-# description stays within Linear's tracker limits and readable. When
-# the spec's content exceeds this cap it is truncated at a clean line
-# boundary (FR-010) with a truncation indicator and the
-# always-present full-spec link (FR-009). Truncation is deterministic —
-# a function of the on-disk bytes only, no timestamps — so an oversized
-# spec reconciled twice unchanged never flips between truncated and
-# untruncated states (FR-013 / SC-005).
+# This total cap bounds the full inlined body so the description stays
+# within Linear's tracker limits and readable. When the spec's content
+# exceeds this cap it is truncated at a clean line boundary (FR-010) with
+# a truncation indicator and the always-present full-spec link (FR-009).
+# Truncation is deterministic — a function of the on-disk bytes only, no
+# timestamps — so an oversized spec reconciled twice unchanged never flips
+# between truncated and untruncated states (FR-013 / SC-005).
 readonly RECONCILE_SPEC_CONTENT_MAX_CHARS=6000
 
 # Bridge-owned description policy (FR-004, FR-016): the spec Issue's
