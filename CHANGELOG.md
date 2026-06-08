@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Configurable artifact mapping — spec 007 (in progress)
+### Configurable artifact mapping — spec 007
 
 Resolves the #17 design question ("should a spec become a Project or an Issue?")
 by making the spec→Linear mapping operator-configurable, while keeping the
@@ -32,10 +32,19 @@ unchanged (no file rewrite, no config-version bump).
   Initiative — Linear Milestones live inside a Project and cannot contain one).
   The #17 spec-as-Project shape is `repo→Initiative, spec→Project, phase→Issue,
   task→sub-issue`.
-- **Projection (follow-up).** Building the non-default shapes in Linear
-  (Initiative/Project/Issue/sub-issue create paths + the L0 super-level) is the
-  next increment; today the grammar + validation ship, the default projection is
-  unchanged. `extension.id` stays `linear`; the command surface is unchanged.
+- **Projection (implemented).** The non-default shapes now project to Linear:
+  the **#17 spec-as-Project** chain mirrors `Initiative > Project > Issue >
+  sub-issue` (idempotent — every level matches/updates by a stable identity
+  marker or label, zero-churn on re-run), and the optional **L0 narrative
+  super-level** creates an Initiative above the repo Project (narrative from the
+  spec `**Input**:` line only) and degrades gracefully where Initiatives aren't
+  available on the plan. Backward-drift detection is preserved on the spec-level
+  work unit in the mapped path too (anchored on the phase Issues' state vs disk;
+  the L0 Initiative is never a drift surface). The default projection is
+  untouched; non-default combinations not yet projected are surfaced and skipped
+  (never a silent partial). `extension.id` stays `linear`; the command surface is
+  unchanged. The configurable projection is new — validate on a test workspace
+  before relying on it in production.
 
 ## [0.3.0] — 2026-06-08 — Config/identity split, team-scoped seeding, faithful projection
 

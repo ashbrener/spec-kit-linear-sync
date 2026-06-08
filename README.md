@@ -165,6 +165,98 @@ stateDiagram-v2
     Merged --> [*]
 ```
 
+## Configurable mapping (optional)
+
+> **Status:** opt-in / newer feature — the default path is the well-trodden one.
+> Validate on a test workspace before enabling in production.
+
+### Default mapping — unchanged and frozen
+
+With no `mapping:` block in `linear-config.yml`, the bridge mirrors spec-kit
+levels to Linear primitives exactly as it always has, byte-for-byte:
+
+| Spec-kit level | Linear artifact | Parent relationship |
+|---|---|---|
+| Repository | **Project** | (top level) |
+| Spec (`specs/NNN-…/`) | **Issue** | under Project |
+| Task phase (`## Phase N`) | **Sub-issue** | under Issue |
+| Tasks within a phase | **Checklist** | inside sub-issue description |
+
+Existing installs are completely unaffected — no config change needed.
+
+### Opt-in `mapping:` block
+
+Add a `mapping:` block to `.specify/extensions/linear/linear-config.yml` to
+choose, per spec-kit level, the Linear artifact and its parent relationship.
+
+**Headline example — spec as Project (resolves design issue #17):**
+
+```yaml
+mapping:
+  levels:
+    repo:
+      artifact: "Initiative"
+      relationship_to_parent: "none"
+    spec:
+      artifact: "Project"
+      relationship_to_parent: "parent"
+    phase:
+      artifact: "Issue"
+      relationship_to_parent: "parent"
+    task:
+      artifact: "sub-issue"
+      relationship_to_parent: "parent"
+```
+
+Result: `Initiative > Project > Issue > sub-issue` — Linear's real hierarchy.
+Projects cannot nest under Projects, so a spec-as-Project must sit under a
+repo-level Initiative. The bridge creates the Initiative automatically if one
+does not already exist for the repo.
+
+This mirrors the configurable-mapping grammar shipped in the sibling
+`spec-kit-jira` extension (`specs/002-configurable-mapping`).
+
+### Optional L0 narrative super-level
+
+```yaml
+mapping:
+  l0:
+    enabled: true
+```
+
+When `l0.enabled` is `true`, the bridge creates a Linear **Initiative** above
+the repo level as a narrative container. Its description is sourced exclusively
+from the spec's `**Input**:` line — the one-sentence statement of intent at the
+top of `spec.md`. This level carries no lifecycle state of its own.
+
+- **Off by default.** Omitting `l0` or setting `enabled: false` folds the
+  narrative onto the repo-level artifact as before.
+- **Degrades gracefully.** Where Initiatives are not available on the Linear
+  plan, the bridge falls back silently to the repo-level Project and emits a
+  one-line notice — it does not fail the reconcile.
+
+### Validation — fail-closed at config-load
+
+The bridge validates the entire `mapping:` block before writing a single byte
+to Linear. Rejected configurations include:
+
+- Dependency links used as nesting relationships (e.g. `blocking` in place of
+  `parent`).
+- `relationship_to_parent: "none"` on any level below the top.
+- Checklist misuse — only the `task` level may map to `checklist`.
+- Linear-impossible nestings (e.g. Project nested under Project).
+
+A rejected config surfaces a descriptive error naming the offending field and
+halts the reconcile. No partial writes occur.
+
+### Identity marker
+
+Initiative and Project artifacts written by the bridge carry a
+`<!-- speckit-id: PLACEHOLDER_UUID -->` marker in their description. The
+reconciler uses this marker for idempotent re-matching across renames — if you
+rename the Initiative or Project in Linear's UI, the bridge still finds the
+correct artifact on the next reconcile. Do not delete that line.
+
 ## The hard-and-fast rule: filesystem wins every conflict
 
 **The bridge MUST NOT write back to the filesystem based on Linear changes (FR-016).** Linear is a read-only mirror of `specs/NNN-feature/`. If you edit a checklist box in Linear, the next reconcile overwrites it. If you rename a spec Issue in Linear, the next reconcile renames it back. The filesystem is the single source of truth — every other surface is downstream.
