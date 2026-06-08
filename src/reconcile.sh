@@ -1363,7 +1363,11 @@ reconcile::_resolve_label_ids_array() {
     local name id allow_create
     for name in "$@"; do
         [[ -n "$name" ]] || continue
-        if [[ "$name" == speckit-spec:* || "$name" == task-phase:* ]]; then
+        if [[ "$name" == speckit-spec:* || "$name" == task-phase:* || "$name" == speckit-task:* ]]; then
+            # speckit-task:* — the task-level identity label for the #17
+            # spec-as-Project shape (task→sub-issue). Lazy-created like
+            # speckit-spec:* (neutral system-label color) so the mapped
+            # projection can mint task identity labels on first sync (spec 007).
             allow_create=1
         else
             allow_create=0
@@ -1811,6 +1815,668 @@ reconcile::mutate_comment_create() {
         return 1
     fi
     summary::add created "commentCreate"
+    return 0
+}
+
+# =============================================================================
+# spec 007 — mapping-driven projection: leaf helpers (Initiative / Project).
+#
+# These power the non-default projection path (config::resolved_* != the frozen
+# default). They are intentionally separate from the default path's
+# issue-centric helpers above. Identity for Initiatives and Projects — which do
+# NOT carry issue labels — is a stable description marker (see
+# specs/007-configurable-mapping/projection-design.md, Decision 2), matched on
+# read exactly like the bridge's memory-block marker. The marker id is
+# filesystem-derived (e.g. `speckit-repo:<slug>`, `speckit-spec:<NNN>`), never
+# minted from Linear state (Principle II).
+# =============================================================================
+
+# The HTML-comment identity marker embedded in an Initiative/Project
+# description. `<id>` is the filesystem-derived identity (prefix + key).
+readonly RECONCILE_MAPPING_ID_OPEN="<!-- speckit-id: "
+readonly RECONCILE_MAPPING_ID_CLOSE=" -->"
+
+# reconcile::mapping_id_marker <id>
+#   Echo the stable description-marker line for an identity id.
+reconcile::mapping_id_marker() {
+    printf '%s%s%s' "${RECONCILE_MAPPING_ID_OPEN}" "$1" "${RECONCILE_MAPPING_ID_CLOSE}"
+}
+
+# reconcile::mapping_id_extract <text>
+#   Echo the identity id carried in the FIRST marker found in <text>, or
+#   empty. Pure string op (no Linear call) so it is trivially testable.
+reconcile::mapping_id_extract() {
+    local text="$1"
+    # Match the first "<!-- speckit-id: X -->" and capture X (trimmed).
+    local line
+    line="$(printf '%s\n' "$text" | grep -o "${RECONCILE_MAPPING_ID_OPEN}[^>]*${RECONCILE_MAPPING_ID_CLOSE}" | head -n1 || true)"
+    if [[ -z "$line" ]]; then
+        return 0
+    fi
+    line="${line#"${RECONCILE_MAPPING_ID_OPEN}"}"
+    line="${line%"${RECONCILE_MAPPING_ID_CLOSE}"}"
+    # Trim surrounding whitespace.
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    printf '%s' "$line"
+}
+
+# reconcile::_compose_marked_description <body> <id>
+#   Echo a description body with the identity marker appended on its own
+#   trailing line (idempotent: if <body> already carries the marker, it is
+#   returned unchanged so re-renders are byte-stable).
+reconcile::_compose_marked_description() {
+    local body="$1" id="$2"
+    local marker
+    marker="$(reconcile::mapping_id_marker "$id")"
+    if [[ "$body" == *"$marker"* ]]; then
+        printf '%s' "$body"
+        return 0
+    fi
+    if [[ -z "$body" ]]; then
+        printf '%s' "$marker"
+    else
+        printf '%s\n\n%s' "$body" "$marker"
+    fi
+}
+
+# reconcile::query_initiative_by_marker <id>
+#   Echo `{id,name,description}` of the Initiative whose description carries
+#   the identity marker for <id>, or empty on no match. Linear has no
+#   description-substring filter, so we list and match client-side.
+reconcile::query_initiative_by_marker() {
+    local id="$1"
+    local marker
+    marker="$(reconcile::mapping_id_marker "$id")"
+    local query='query ListInitiatives {
+        initiatives(first: 250) { nodes { id name description } }
+    }'
+    local response
+    response="$(graphql::query "$query" '{}')"
+    printf '%s' "$response" | jq -c --arg m "$marker" '
+        [ .data.initiatives.nodes[]?
+          | select((.description // "") | contains($m)) ]
+        | (first // empty)
+    '
+}
+
+# reconcile::ensure_initiative <id> <name> <body>
+#   Idempotently project an Initiative carrying the <id> marker. Creates it
+#   when absent; updates name/description only when they differ (zero churn);
+#   skips otherwise. Echoes the Initiative UUID on stdout.
+reconcile::ensure_initiative() {
+    local id="$1" name="$2" body="$3"
+    local desired_desc existing existing_id existing_name existing_desc
+    desired_desc="$(reconcile::_compose_marked_description "$body" "$id")"
+
+    existing="$(reconcile::query_initiative_by_marker "$id")"
+    if [[ -n "$existing" && "$existing" != "null" ]]; then
+        existing_id="$(printf '%s' "$existing" | jq -r '.id')"
+        existing_name="$(printf '%s' "$existing" | jq -r '.name // ""')"
+        existing_desc="$(printf '%s' "$existing" | jq -r '.description // ""')"
+        if [[ "$existing_name" == "$name" && "$existing_desc" == "$desired_desc" ]]; then
+            summary::add skipped "initiative '${name}' (unchanged)"
+            printf '%s' "$existing_id"
+            return 0
+        fi
+        if (( ARG_DRY_RUN == 1 )); then
+            reconcile::log "DRY-RUN initiativeUpdate id=${existing_id}"
+            summary::add updated "initiative '${name}' (dry-run)"
+            printf '%s' "$existing_id"
+            return 0
+        fi
+        local mutation='mutation UpdInitiative($id: String!, $input: InitiativeUpdateInput!) {
+            initiativeUpdate(id: $id, input: $input) { success }
+        }'
+        local vars
+        vars="$(jq -nc --arg id "$existing_id" --arg name "$name" --arg desc "$desired_desc" \
+            '{id: $id, input: {name: $name, description: $desc}}')"
+        local resp
+        if ! resp="$(graphql::mutate "$mutation" "$vars")" \
+            || ! printf '%s' "$resp" | jq -e '.data.initiativeUpdate.success == true' >/dev/null 2>&1; then
+            summary::add error "initiativeUpdate '${name}' failed"
+            reconcile::promote_exit 1
+            printf '%s' "$existing_id"
+            return 1
+        fi
+        summary::add updated "initiative '${name}'"
+        printf '%s' "$existing_id"
+        return 0
+    fi
+
+    # Not found → create.
+    if (( ARG_DRY_RUN == 1 )); then
+        reconcile::log "DRY-RUN initiativeCreate name=${name}"
+        summary::add created "initiative '${name}' (dry-run)"
+        printf 'dry-run-initiative-id'
+        return 0
+    fi
+    local mutation='mutation NewInitiative($input: InitiativeCreateInput!) {
+        initiativeCreate(input: $input) { success initiative { id } }
+    }'
+    local vars
+    vars="$(jq -nc --arg name "$name" --arg desc "$desired_desc" \
+        '{input: {name: $name, description: $desc}}')"
+    local resp new_id
+    if ! resp="$(graphql::mutate "$mutation" "$vars")" \
+        || ! printf '%s' "$resp" | jq -e '.data.initiativeCreate.success == true' >/dev/null 2>&1; then
+        summary::add error "initiativeCreate '${name}' failed"
+        reconcile::promote_exit 1
+        return 1
+    fi
+    new_id="$(printf '%s' "$resp" | jq -r '.data.initiativeCreate.initiative.id')"
+    summary::add created "initiative '${name}' → ${new_id}"
+    printf '%s' "$new_id"
+}
+
+# reconcile::query_project_by_marker <id> <team_uuid>
+#   Echo `{id,name,description}` of the Project (within the team) whose
+#   description carries the identity marker for <id>, or empty on no match.
+reconcile::query_project_by_marker() {
+    local id="$1" team_uuid="$2"
+    local marker
+    marker="$(reconcile::mapping_id_marker "$id")"
+    local query='query ListTeamProjects($team: String!) {
+        team(id: $team) { projects(first: 250) { nodes { id name description } } }
+    }'
+    local vars response
+    vars="$(jq -nc --arg team "$team_uuid" '{team: $team}')"
+    response="$(graphql::query "$query" "$vars")"
+    printf '%s' "$response" | jq -c --arg m "$marker" '
+        [ .data.team.projects.nodes[]?
+          | select((.description // "") | contains($m)) ]
+        | (first // empty)
+    '
+}
+
+# reconcile::ensure_project <id> <name> <body> <team_uuid>
+#   Idempotently project a Project carrying the <id> marker, scoped to the
+#   team. Creates when absent; updates name/description only when they differ;
+#   skips otherwise. Echoes the Project UUID. (Linking to a parent Initiative
+#   is handled by the caller in the US2 wiring step.)
+reconcile::ensure_project() {
+    local id="$1" name="$2" body="$3" team_uuid="$4"
+    local desired_desc existing existing_id existing_name existing_desc
+    desired_desc="$(reconcile::_compose_marked_description "$body" "$id")"
+
+    existing="$(reconcile::query_project_by_marker "$id" "$team_uuid")"
+    if [[ -n "$existing" && "$existing" != "null" ]]; then
+        existing_id="$(printf '%s' "$existing" | jq -r '.id')"
+        existing_name="$(printf '%s' "$existing" | jq -r '.name // ""')"
+        existing_desc="$(printf '%s' "$existing" | jq -r '.description // ""')"
+        if [[ "$existing_name" == "$name" && "$existing_desc" == "$desired_desc" ]]; then
+            summary::add skipped "project '${name}' (unchanged)"
+            printf '%s' "$existing_id"
+            return 0
+        fi
+        if (( ARG_DRY_RUN == 1 )); then
+            reconcile::log "DRY-RUN projectUpdate id=${existing_id}"
+            summary::add updated "project '${name}' (dry-run)"
+            printf '%s' "$existing_id"
+            return 0
+        fi
+        local mutation='mutation UpdProject($id: String!, $input: ProjectUpdateInput!) {
+            projectUpdate(id: $id, input: $input) { success }
+        }'
+        local vars
+        vars="$(jq -nc --arg id "$existing_id" --arg name "$name" --arg desc "$desired_desc" \
+            '{id: $id, input: {name: $name, description: $desc}}')"
+        local resp
+        if ! resp="$(graphql::mutate "$mutation" "$vars")" \
+            || ! printf '%s' "$resp" | jq -e '.data.projectUpdate.success == true' >/dev/null 2>&1; then
+            summary::add error "projectUpdate '${name}' failed"
+            reconcile::promote_exit 1
+            printf '%s' "$existing_id"
+            return 1
+        fi
+        summary::add updated "project '${name}'"
+        printf '%s' "$existing_id"
+        return 0
+    fi
+
+    if (( ARG_DRY_RUN == 1 )); then
+        reconcile::log "DRY-RUN projectCreate name=${name}"
+        summary::add created "project '${name}' (dry-run)"
+        printf 'dry-run-project-id'
+        return 0
+    fi
+    local mutation='mutation NewProject($input: ProjectCreateInput!) {
+        projectCreate(input: $input) { success project { id } }
+    }'
+    local vars
+    vars="$(jq -nc --arg name "$name" --arg desc "$desired_desc" --arg team "$team_uuid" \
+        '{input: {name: $name, description: $desc, teamIds: [$team]}}')"
+    local resp new_id
+    if ! resp="$(graphql::mutate "$mutation" "$vars")" \
+        || ! printf '%s' "$resp" | jq -e '.data.projectCreate.success == true' >/dev/null 2>&1; then
+        summary::add error "projectCreate '${name}' failed"
+        reconcile::promote_exit 1
+        return 1
+    fi
+    new_id="$(printf '%s' "$resp" | jq -r '.data.projectCreate.project.id')"
+    summary::add created "project '${name}' → ${new_id}"
+    printf '%s' "$new_id"
+}
+
+# reconcile::link_project_to_initiative <project_id> <initiative_id>
+#   Idempotently nest a Project under an Initiative (the #17 spec→Project under
+#   repo→Initiative containment). Queries the Project's current initiative
+#   membership first and only mutates when the target link is absent (zero
+#   churn on re-run). Uses `projectUpdate { addInitiativeIds }` — additive, so
+#   it never disturbs any other initiative the Project belongs to. (Link shape
+#   VERIFIED — see specs/007-configurable-mapping/projection-api-notes.md.)
+reconcile::link_project_to_initiative() {
+    local project_id="$1" initiative_id="$2"
+
+    local query='query ProjInitiatives($id: String!) {
+        project(id: $id) { initiatives { nodes { id } } }
+    }'
+    local qvars response already
+    qvars="$(jq -nc --arg id "$project_id" '{id: $id}')"
+    response="$(graphql::query "$query" "$qvars")"
+    already="$(printf '%s' "$response" \
+        | jq -r --arg t "$initiative_id" \
+            '[.data.project.initiatives.nodes[]?.id] | any(. == $t)')"
+    if [[ "$already" == "true" ]]; then
+        summary::add skipped "project↔initiative link (already nested)"
+        return 0
+    fi
+
+    if (( ARG_DRY_RUN == 1 )); then
+        reconcile::log "DRY-RUN projectUpdate addInitiativeIds project=${project_id} initiative=${initiative_id}"
+        summary::add updated "project↔initiative link (dry-run)"
+        return 0
+    fi
+    local mutation='mutation LinkProjInitiative($id: String!, $input: ProjectUpdateInput!) {
+        projectUpdate(id: $id, input: $input) { success }
+    }'
+    local mvars resp
+    mvars="$(jq -nc --arg id "$project_id" --arg init "$initiative_id" \
+        '{id: $id, input: {addInitiativeIds: [$init]}}')"
+    if ! resp="$(graphql::mutate "$mutation" "$mvars")" \
+        || ! printf '%s' "$resp" | jq -e '.data.projectUpdate.success == true' >/dev/null 2>&1; then
+        summary::add error "project↔initiative link failed"
+        reconcile::promote_exit 1
+        return 1
+    fi
+    summary::add updated "project↔initiative link"
+    return 0
+}
+
+# reconcile::_mapped_ensure_issue <label> <project_id> <title> <description> \
+#                                 <state_uuid|""> [parent_id]
+#   Idempotently project an Issue (or sub-issue, when [parent_id] is given)
+#   identified by <label> within <project_id>. Find-or-create-or-update: queries
+#   by label+project, creates on 0 matches, and on a match writes ONLY the
+#   changed fields (title/description/state) so a re-run against unchanged disk
+#   is zero churn (FR-008). Echoes the Issue UUID. Used by the mapped #17 path
+#   for phase→Issue (no parent) and task→sub-issue (parent = the phase Issue).
+reconcile::_mapped_ensure_issue() {
+    local label="$1" project_id="$2" title="$3" description="$4" state_uuid="$5" parent_id="${6:-}"
+    local team_id
+    team_id="$(config::get_team_id)"
+
+    local label_ids
+    label_ids="$(reconcile::_resolve_label_ids_array "$label")"
+
+    local query='query FindMappedIssue($label: String!, $project: ID!) {
+        issues(filter: { labels: { name: { eq: $label } }, project: { id: { eq: $project } } }) {
+            nodes { id title description state { id } }
+        }
+    }'
+    local qvars resp existing_id
+    qvars="$(jq -nc --arg label "$label" --arg project "$project_id" '{label: $label, project: $project}')"
+    resp="$(graphql::query "$query" "$qvars")"
+    existing_id="$(printf '%s' "$resp" | jq -r '.data.issues.nodes[0].id // ""')"
+
+    if [[ -n "$existing_id" ]]; then
+        local cur_title cur_desc cur_state diff
+        cur_title="$(printf '%s' "$resp" | jq -r '.data.issues.nodes[0].title // ""')"
+        cur_desc="$(printf '%s' "$resp" | jq -r '.data.issues.nodes[0].description // ""')"
+        cur_state="$(printf '%s' "$resp" | jq -r '.data.issues.nodes[0].state.id // ""')"
+        # Build a minimal diff — only the fields that actually changed. An
+        # empty diff makes mutate_issue_update a no-op (zero churn).
+        diff="$(jq -nc \
+            --arg t "$title"        --arg ct "$cur_title" \
+            --arg d "$description"  --arg cd "$cur_desc" \
+            --arg s "$state_uuid"   --arg cs "$cur_state" '
+            {}
+            | (if $t != $ct then .title = $t else . end)
+            | (if $d != $cd then .description = $d else . end)
+            | (if ($s != "" and $s != $cs) then .stateId = $s else . end)
+        ')"
+        reconcile::mutate_issue_update "$existing_id" "$diff" || true
+        printf '%s' "$existing_id"
+        return 0
+    fi
+
+    # Create.
+    local input created new_id
+    input="$(jq -nc \
+        --arg t "$title" --arg d "$description" --arg team "$team_id" \
+        --arg proj "$project_id" --arg state "$state_uuid" \
+        --argjson labels "$label_ids" --arg parent "$parent_id" '
+        ( { title: $t, description: $d, teamId: $team, projectId: $proj, labelIds: $labels }
+          + (if $state  != "" then { stateId:  $state  } else {} end)
+          + (if $parent != "" then { parentId: $parent } else {} end) )
+    ')"
+    if ! created="$(reconcile::mutate_issue_create "$input")"; then
+        return 1
+    fi
+    new_id="$(printf '%s' "$created" | jq -r '.id // ""')"
+    printf '%s' "$new_id"
+}
+
+# reconcile::_state_ordinal_key <todo|in_progress|done>
+#   Map a disk-derived sub-issue state key to an ordinal (todo=0 < in_progress=1
+#   < done=2) for the mapped-path drift comparison.
+reconcile::_state_ordinal_key() {
+    case "$1" in
+        done)        printf '2' ;;
+        in_progress) printf '1' ;;
+        *)           printf '0' ;;
+    esac
+}
+
+# reconcile::_state_ordinal_type <linear state.type>
+#   Map a Linear workflow-state `type` to the same ordinal scale. Only
+#   `started` (1) and `completed` (2) count as "advanced"; everything else
+#   (backlog/unstarted/triage/canceled) is 0 so a cancelled or backlog phase
+#   never spuriously reads as "ahead" of disk.
+reconcile::_state_ordinal_type() {
+    case "$1" in
+        completed) printf '2' ;;
+        started)   printf '1' ;;
+        *)         printf '0' ;;
+    esac
+}
+
+# reconcile::_mapped_compute_drift <project_id> <spec_dir> <feature_number> \
+#                                  <disk_lifecycle>
+#   Backward-drift verdict for a #17 spec→Project, anchored on the spec's
+#   phase Issues (FR-010). For each task phase, compare the phase Issue's
+#   CURRENT Linear workflow state (read before this run writes) against the
+#   disk-derived state (subissue_state_key from task checkboxes). If ANY phase
+#   Issue is further along in Linear than on disk, Linear is ahead → drift
+#   fires. This is independent + non-spurious: the bridge writes phase states
+#   FROM disk, so an unchanged re-run reads Linear == disk and fires nothing
+#   (idempotent, SC-017); only an out-of-band advance (manual edit / future
+#   automation) trips it. Emits a verdict line in compute_drift's format so the
+#   existing _emit_drift_warning + _drift_disposition machinery is reused
+#   verbatim. PURE-ish: one read-only query, no writes.
+reconcile::_mapped_compute_drift() {
+    local project_id="$1" spec_dir="$2" feature_number="$3" disk_lifecycle="$4"
+    : "${feature_number:-}"
+    local tasks_md="${spec_dir%/}/tasks.md"
+
+    local query='query MappedPhaseStates($pid: ID!) {
+        issues(filter: { project: { id: { eq: $pid } } }, first: 250) {
+            nodes { id state { type } labels { nodes { name } } }
+        }
+    }'
+    local vars resp
+    vars="$(jq -nc --arg pid "$project_id" '{pid: $pid}')"
+    if ! resp="$(graphql::query "$query" "$vars" 2>/dev/null)"; then
+        # Unreadable Linear → treat as no-drift here; the caller's own
+        # fail-closed policy (if any) governs the run.
+        printf 'fired=0 phase_drift=0 recency_drift=0 signals= disk=%s linear=\n' "${disk_lifecycle:-}"
+        return 0
+    fi
+
+    local fired=0 ahead_detail='' idx name
+    while IFS=$'\t' read -r idx name; do
+        : "${name:-}"
+        [[ -n "$idx" ]] || continue
+        local disk_key disk_ord lin_type lin_ord
+        disk_key="$(reconcile::subissue_state_key "$tasks_md" "$idx")"
+        disk_ord="$(reconcile::_state_ordinal_key "$disk_key")"
+        lin_type="$(printf '%s' "$resp" | jq -r --arg l "task-phase:${idx}" '
+            [ .data.issues.nodes[]? | select(any(.labels.nodes[]?; .name == $l)) ][0].state.type // ""')"
+        [[ -n "$lin_type" ]] || continue
+        lin_ord="$(reconcile::_state_ordinal_type "$lin_type")"
+        if (( lin_ord > disk_ord )); then
+            fired=1
+            if [[ -n "$ahead_detail" ]]; then
+                ahead_detail="${ahead_detail},phase${idx}"
+            else
+                ahead_detail="phase${idx}"
+            fi
+        fi
+    done < <(parser::task_phases "$tasks_md")
+
+    if (( fired == 1 )); then
+        printf 'fired=1 phase_drift=1 recency_drift=0 signals=phase_ordering disk=%s linear=%s\n' \
+            "${disk_lifecycle:-}" "${ahead_detail} ahead in Linear"
+    else
+        printf 'fired=0 phase_drift=0 recency_drift=0 signals= disk=%s linear=\n' "${disk_lifecycle:-}"
+    fi
+}
+
+# reconcile::_repo_slug
+#   Echo a stable, filesystem-derived repo slug for the repo-level identity
+#   marker (the git toplevel basename, falling back to PWD). Never minted from
+#   Linear state (Principle II).
+reconcile::_repo_slug() {
+    local top
+    top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ -n "$top" ]]; then
+        basename "$top"
+    else
+        basename "$PWD"
+    fi
+}
+
+# reconcile::_l0_initiative_available
+#   Probe whether Linear Initiatives are usable on this workspace (the L0
+#   super-level artifact). Read-only. The probe runs in a SUBSHELL so
+#   graphql::query's fail-closed `exit` only kills the probe (we want a
+#   true/false here, not a halt). Return 0 when the `initiatives` query
+#   succeeds, 1 when it errors (plan-gated / capability gap → degrade path).
+reconcile::_l0_initiative_available() {
+    if ( graphql::query 'query L0Probe { initiatives(first: 1) { nodes { id } } }' '{}' >/dev/null 2>&1 ); then
+        return 0
+    fi
+    return 1
+}
+
+# reconcile::_degrade_l0_onto_repo <repo_slug> <narrative>
+#   Graceful degradation (FR-011): when Initiatives are unavailable, fold the L0
+#   narrative onto the repo level (the bound Project) behind a stable marker so
+#   the narrative always lands and the run never hard-fails. Idempotent — the
+#   marker check makes a re-run zero churn. The narrative is the explicit
+#   spec-input only (FR-012); never inferred.
+reconcile::_degrade_l0_onto_repo() {
+    local repo_slug="$1" narrative="$2"
+    local pid marker
+    pid="$(config::get_project_id)"
+    marker="$(reconcile::mapping_id_marker "speckit-narrative:${repo_slug}")"
+
+    local q resp cur
+    q='query L0RepoDesc($id: String!) { project(id: $id) { description } }'
+    resp="$(graphql::query "$q" "$(jq -nc --arg id "$pid" '{id: $id}')" 2>/dev/null)" || return 0
+    cur="$(printf '%s' "$resp" | jq -r '.data.project.description // ""')"
+    if [[ "$cur" == *"$marker"* ]]; then
+        summary::add skipped "L0 narrative degrade (already folded onto repo Project)"
+        return 0
+    fi
+
+    local desired
+    if [[ -n "$cur" ]]; then
+        desired="${cur}"$'\n\n'"${marker}"$'\n'"${narrative}"
+    else
+        desired="${marker}"$'\n'"${narrative}"
+    fi
+    if (( ARG_DRY_RUN == 1 )); then
+        summary::add warned "L0 super-level: Initiatives unavailable — narrative would fold onto the repo Project (dry-run, degraded)"
+        return 0
+    fi
+    local mut mvars
+    mut='mutation L0Degrade($id: String!, $input: ProjectUpdateInput!) { projectUpdate(id: $id, input: $input) { success } }'
+    mvars="$(jq -nc --arg id "$pid" --arg d "$desired" '{id: $id, input: {description: $d}}')"
+    if ! graphql::mutate "$mut" "$mvars" >/dev/null 2>&1; then
+        summary::add error "L0 narrative degrade: projectUpdate failed"
+        return 1
+    fi
+    summary::add warned "L0 super-level: Initiatives unavailable on this workspace — narrative folded onto the repo Project (degraded, FR-011)"
+    return 0
+}
+
+# reconcile::_project_l0_initiative <spec_dir>
+#   Project the off-by-default L0 narrative super-level above the repo level
+#   (FR-011/FR-012). Narrative comes ONLY from the spec's `**Input**:` line.
+#   Where Initiatives are available: ensure the Initiative and nest the bound
+#   repo Project under it. Where unavailable: degrade onto the repo Project.
+#   The L0 level is narrative-only and is NEVER a backward-drift surface
+#   (FR-010). Non-fatal: a failure here must not abort the spec's default
+#   projection that follows.
+reconcile::_project_l0_initiative() {
+    local spec_dir="$1"
+    local repo_slug narrative
+    repo_slug="$(reconcile::_repo_slug)"
+    narrative="$(reconcile::_extract_input "${spec_dir%/}/spec.md" 2>/dev/null || true)"
+
+    if ! reconcile::_l0_initiative_available; then
+        reconcile::_degrade_l0_onto_repo "$repo_slug" "$narrative" || true
+        return 0
+    fi
+
+    local initiative_id project_id
+    initiative_id="$(reconcile::ensure_initiative "speckit-repo:${repo_slug}" "${repo_slug}" "$narrative")" || initiative_id=""
+    if [[ -z "$initiative_id" || "$initiative_id" == "null" ]]; then
+        reconcile::_degrade_l0_onto_repo "$repo_slug" "$narrative" || true
+        return 0
+    fi
+    project_id="$(config::get_project_id)"
+    reconcile::link_project_to_initiative "$project_id" "$initiative_id" || true
+    return 0
+}
+
+# reconcile::process_spec_mapped <spec_dir>
+#   The non-default projection path (dispatched when config::mapping_is_default
+#   is false). This first increment projects the #17 spec-as-Project CONTAINER
+#   hierarchy — repo→Initiative and spec→Project, nested — idempotently via the
+#   tested leaf helpers. The within-Project phase→Issue / task→sub-issue
+#   projection and the mapped-path backward-drift anchor are the next
+#   sub-increment; until they land this surfaces a loud notice (Principle VIII —
+#   never a silent partial). Any other valid-but-unimplemented mapping
+#   combination is likewise surfaced and skipped, writing nothing.
+reconcile::process_spec_mapped() {
+    local spec_dir="$1"
+
+    local feature_number short_name spec_md
+    if ! feature_number="$(parser::feature_number "$spec_dir")"; then
+        summary::add warned "spec dir ${spec_dir}: basename does not match NNN-<slug>; skipping"
+        return 0
+    fi
+    if ! short_name="$(parser::short_name "$spec_dir")"; then
+        summary::add warned "spec dir ${spec_dir}: cannot extract short name; skipping"
+        return 0
+    fi
+    spec_md="${spec_dir%/}/spec.md"
+    if [[ ! -s "$spec_md" ]]; then
+        summary::add warned "spec ${feature_number}: spec.md missing or empty; skipping"
+        return 0
+    fi
+
+    local repo_artifact spec_artifact
+    repo_artifact="$(config::resolved_artifact repo)"
+    spec_artifact="$(config::resolved_artifact spec)"
+
+    # Only the #17 spec-as-Project chain is implemented in the mapped path so
+    # far. Every other combination is VALID (the config-load matrix accepted
+    # it) but its projection is not yet built — surface and skip, writing
+    # nothing, rather than half-mirror.
+    if [[ "$repo_artifact" != "Initiative" || "$spec_artifact" != "Project" ]]; then
+        summary::add warned "spec ${feature_number}: configured mapping (repo→${repo_artifact}, spec→${spec_artifact}) is valid but its projection is not yet implemented (only the #17 shape: repo→Initiative, spec→Project). No writes performed."
+        return 0
+    fi
+
+    local team_id repo_slug spec_content
+    team_id="$(config::get_team_id)"
+    repo_slug="$(reconcile::_repo_slug)"
+    spec_content="$(reconcile::render_spec_content_block "$spec_dir" 2>/dev/null || true)"
+
+    # --- backward-drift pre-check (FR-010, Principle IV) ------------------
+    # READ-ONLY, before any write: if the spec Project already exists, compare
+    # its phase Issues' current Linear states against disk (the spec-level
+    # anchor). On a fire, surface the WARNING (reusing the default machinery)
+    # and resolve the disposition; an operator/flag abort leaves Linear
+    # unchanged (FR-057). The L0 Initiative is never a drift surface (FR-010).
+    local mapped_existing_proj
+    mapped_existing_proj="$(reconcile::query_project_by_marker "speckit-spec:${feature_number}" "$team_id" 2>/dev/null)" || mapped_existing_proj=""
+    if [[ -n "$mapped_existing_proj" && "$mapped_existing_proj" != "null" ]]; then
+        local mapped_pid mapped_disk_phase mapped_pr_hint mapped_verdict
+        mapped_pid="$(printf '%s' "$mapped_existing_proj" | jq -r '.id // ""')"
+        mapped_pr_hint="$(reconcile::pr_state_hint "$(git_helpers::pr_state "${feature_number}-${short_name}" 2>/dev/null || true)")"
+        mapped_disk_phase="$(parser::lifecycle_phase "$spec_dir" "$mapped_pr_hint" 2>/dev/null || true)"
+        if [[ -n "$mapped_pid" ]]; then
+            mapped_verdict="$(reconcile::_mapped_compute_drift "$mapped_pid" "$spec_dir" "$feature_number" "$mapped_disk_phase")"
+            if [[ "$(reconcile::_drift_verdict_field "$mapped_verdict" fired)" == "1" ]]; then
+                reconcile::_emit_drift_warning "$feature_number" "$mapped_verdict"
+                if [[ "$(reconcile::_drift_disposition "$feature_number" "$mapped_verdict")" == "abort" ]]; then
+                    summary::add skipped "spec ${feature_number} skipped by operator (backward-drift abort) — Linear unchanged"
+                    reconcile::log "spec ${feature_number}: mapped drift disposition=abort; skipping write (Linear unchanged)"
+                    return 0
+                fi
+            fi
+        fi
+    fi
+
+    # repo → Initiative (the above-Project container).
+    local initiative_id
+    initiative_id="$(reconcile::ensure_initiative "speckit-repo:${repo_slug}" "${repo_slug}" "")"
+
+    # spec → Project, nested under the Initiative.
+    local spec_marker spec_name project_id
+    spec_marker="speckit-spec:${feature_number}"
+    spec_name="${feature_number}-${short_name}"
+    project_id="$(reconcile::ensure_project "$spec_marker" "$spec_name" "$spec_content" "$team_id")"
+    if [[ -z "$project_id" || "$project_id" == "null" ]]; then
+        summary::add error "spec ${feature_number}: mapped spec→Project create failed"
+        return 0
+    fi
+    if [[ -n "$initiative_id" && "$initiative_id" != "null" ]]; then
+        reconcile::link_project_to_initiative "$project_id" "$initiative_id" || true
+    fi
+
+    # phase → Issue (under the spec Project) and task → sub-issue (under the
+    # phase Issue), idempotently keyed by their identity labels within the
+    # Project. The phase Issue's state rolls up from its tasks' completion
+    # (reused subissue_state_key); each task sub-issue's state is todo/done by
+    # its own checkbox. State UUIDs are resolved best-effort — a config without
+    # default_state_uuids still projects the hierarchy (issue takes the team
+    # default state) rather than halting.
+    local tasks_md="${spec_dir%/}/tasks.md"
+    local idx name
+    while IFS=$'\t' read -r idx name; do
+        [[ -n "$idx" ]] || continue
+        local phase_state_key phase_state_uuid phase_issue_id
+        phase_state_key="$(reconcile::subissue_state_key "$tasks_md" "$idx")"
+        phase_state_uuid="$(config::get_default_state_uuid "$phase_state_key" 2>/dev/null)" || phase_state_uuid=""
+        phase_issue_id="$(reconcile::_mapped_ensure_issue \
+            "task-phase:${idx}" "$project_id" \
+            "Phase ${idx} — ${name}" \
+            "Phase ${idx}: ${name} — read-only mirror of tasks.md (spec ${feature_number})." \
+            "$phase_state_uuid" "")"
+        [[ -n "$phase_issue_id" && "$phase_issue_id" != "null" ]] || continue
+
+        local tid tstate tdesc test task_state_uuid
+        while IFS=$'\t' read -r tid tstate tdesc test; do
+            : "${test:-}"
+            [[ -n "$tid" ]] || continue
+            if [[ "$tstate" == "checked" ]]; then
+                task_state_uuid="$(config::get_default_state_uuid "done" 2>/dev/null)" || task_state_uuid=""
+            else
+                task_state_uuid="$(config::get_default_state_uuid "todo" 2>/dev/null)" || task_state_uuid=""
+            fi
+            reconcile::_mapped_ensure_issue \
+                "speckit-task:${tid}" "$project_id" \
+                "${tid} ${tdesc}" "$tdesc" \
+                "$task_state_uuid" "$phase_issue_id" >/dev/null || true
+        done < <(parser::tasks_in_phase "$tasks_md" "$idx")
+    done < <(parser::task_phases "$tasks_md")
+
+    reconcile::log "spec ${feature_number}: mapped #17 projection complete (project=${project_id})"
     return 0
 }
 
@@ -3229,6 +3895,33 @@ reconcile::pr_state_hint() {
 #   --all sweep (FR-024).
 reconcile::process_spec() {
     local spec_dir="$1"
+
+    # spec 007 — dispatch by configured mapping (projection-design.md Decision 1).
+    # Default mapping → the battle-tested 001 projection below, unchanged.
+    if ! config::mapping_is_default; then
+        local _disp_repo _disp_spec
+        _disp_repo="$(config::resolved_artifact repo)"
+        _disp_spec="$(config::resolved_artifact spec)"
+        if [[ "$_disp_repo" == "Initiative" && "$_disp_spec" == "Project" ]]; then
+            # #17 spec-as-Project chain → the mapped projection path.
+            reconcile::process_spec_mapped "$spec_dir"
+            return $?
+        fi
+        if config::l0_enabled && config::mapping_levels_are_default; then
+            # L0 narrative super-level above an otherwise-default projection
+            # (US4): add the Initiative above the repo Project, then FALL
+            # THROUGH to the unchanged default projection below.
+            reconcile::_project_l0_initiative "$spec_dir" || true
+            # fall through (no return)
+        else
+            # Other valid-but-unimplemented combinations: surface and skip,
+            # writing nothing (Principle VIII — never a silent partial).
+            local _skip_fn
+            _skip_fn="$(parser::feature_number "$spec_dir" 2>/dev/null || printf '%s' "${spec_dir}")"
+            summary::add warned "spec ${_skip_fn}: configured mapping (repo→${_disp_repo}, spec→${_disp_spec}) is valid but its projection is not yet implemented. No writes performed."
+            return 0
+        fi
+    fi
 
     local feature_number short_name spec_md
     if ! feature_number="$(parser::feature_number "$spec_dir")"; then

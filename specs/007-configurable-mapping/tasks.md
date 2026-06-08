@@ -29,30 +29,45 @@ checklist mode" task family — `task→checklist` is already the Linear default
 
 ## Implementation status (2026-06-08)
 
-**Shipped (this increment — config layer, green):** Foundational (T003–T010), US1
-(T013–T014), and the validation half of US2 (the offline relationship +
-Linear-native containment matrix, T006/T010) are implemented and unit-tested in
-`src/config.sh`, with the gate wired into `reconcile::load_config`. Polish T029
-(shellcheck), T031 (markdownlint), T034 (CONTRIBUTING), T035 (CHANGELOG) done.
-25 mapping unit tests green; full unit suite green.
+**Config layer (PR #56, merged):** Foundational (T003–T010) + US1 (T013–T014) —
+the `mapping:` grammar, alias default, per-level inheritance, resolved-mapping
+accessors, and the fail-closed relationship + Linear-native containment matrix,
+wired into `reconcile::load_config`.
 
-**Model correction applied during implementation:** the design docs were
-re-grounded on Linear's real hierarchy — `Initiative > Project > Issue >
-sub-issue`. The narrative super-level (L0) is an **Initiative** (not a Milestone —
-Linear Milestones live inside a Project), and the #17 spec-as-Project shape is
-`repo→Initiative, spec→Project, phase→Issue, task→sub-issue` (Linear Projects
-cannot nest under Projects). The validator rejects Linear-impossible nestings.
+**Projection (branch `008-mapping-projection`, this increment):**
 
-**Deferred to a focused follow-up increment — the projection build:** US2
-artifact projection (T015–T020), US3 end-to-end partial-inheritance integration
-(T021–T022), US4 L0 Initiative super-level + GraphQL (T023–T028), the setup
-fixtures (T001/T002), and the reconcile-level integration tests (T011/T012,
-T019/T020). These require surgery in the 3,700-line `src/reconcile.sh` (new
-Initiative/Project/Issue/sub-issue create + query + idempotency paths) and are
-intentionally a separate, tightly-scoped, green increment per the constitution's
-safety guarantees. The shipped config layer is HONEST in the meantime: it never
-accepts a mapping the projection could not build. README (T033) is held until the
-projection lands so it does not advertise not-yet-built behaviour.
+- **US2 — #17 spec-as-Project, complete.** `process_spec_mapped` projects
+  `Initiative > Project > Issue > sub-issue` idempotently — `ensure_initiative` /
+  `ensure_project` (description-marker identity) / `link_project_to_initiative`
+  (T015–T018), phase→Issue + task→sub-issue via `_mapped_ensure_issue`
+  (find-or-create-or-update, zero-churn), and the **mapped-path backward-drift
+  anchor** (`_mapped_compute_drift`, FR-010 — phase-Issue state vs disk, reusing
+  the default warning/disposition machinery).
+- **US3 — partial inheritance.** Satisfied by the resolver + per-level
+  inheritance (config-layer tests T005); the projection consumes the resolved
+  mapping, so a partial block needs no extra projection code.
+- **US4 — L0 Initiative super-level (T023–T028).** `_project_l0_initiative`:
+  narrative from the spec `**Input**:` only (FR-012); Initiative above the repo
+  Project where available, graceful degrade onto the repo Project where not
+  (FR-011). Off by default; never a drift surface.
+
+**Model correction applied during implementation:** re-grounded on Linear's real
+hierarchy — `Initiative > Project > Issue > sub-issue`. The L0 super-level is an
+**Initiative** (not a Milestone — Linear Milestones live inside a Project).
+Project-in-Project is rejected by the validator.
+
+**Tests:** 35 mapping/projection unit tests (stubbed transport — hermetic,
+offline) + full unit suite green; shellcheck `--severity=style` + markdownlint
+clean; the default path is provably untouched (`us1-fresh-reconcile` passes with
+the dispatch live). Two `set -e`/exit-in-`$()` correctness bugs were caught and
+fixed during this work.
+
+**Remaining / follow-up:** a curl-shim **integration** test for the #17 shape
+(the unit suite covers the logic with stubs; integration tests are gated off in
+CI today) and a **live dogfood** validation against a real Linear workspace
+before relying on the mapped projection in production. Other valid-but-unbuilt
+mapping combinations (e.g. partial #17 chains beyond repo→Initiative/spec→Project)
+are surfaced-and-skipped, never silently partial.
 
 ## Format: `[ID] [P?] [Story?] Description with file path`
 
@@ -124,10 +139,10 @@ those artifacts with the configured parent relationships; then configure a
 nonsensical hierarchy relationship and confirm the run is rejected before any
 write.
 
-- [ ] T015 [P] [US2] Unit test `tests/unit/mapping_project_level.bats` — `reconcile::sync_level_artifact` creates/updates the configured artifact (Project / Issue / sub-issue) under the parent via the configured relationship; `reconcile::link_to_parent` applies `parent` (sub-issue nesting) and no-ops for `none`/`checklist`; idempotent match by the resolved identity key (`contracts/config-reconcile-interface.md` §projection)
-- [ ] T016 [P] [US2] Unit test `tests/unit/mapping_identity_keys.bats` — a level projected to a standalone Issue or a Project (the #17 alternative) carries a stable filesystem-derived identity label so re-runs match/update rather than re-create (FR-009)
-- [ ] T017 [US2] Implement `reconcile::sync_level_artifact` + `reconcile::link_to_parent` in `src/reconcile.sh` — mapping-driven create/update of the configured artifact with the configured relationship, reading artifact/relationship/identity from `config::resolved_*`; sub-issue nesting via `parent`; idempotent match by identity label (FR-003, FR-004, FR-009)
-- [ ] T018 [US2] Wire `src/reconcile.sh` orchestration so `config::mapping_validate` (relationship matrix + required-id) runs before the write loop; a failure aborts the run with exit 2 and writes nothing (FR-007, FR-013, fail-closed)
+- [X] T015 [P] [US2] Unit test `tests/unit/mapping_project_level.bats` — `reconcile::sync_level_artifact` creates/updates the configured artifact (Project / Issue / sub-issue) under the parent via the configured relationship; `reconcile::link_to_parent` applies `parent` (sub-issue nesting) and no-ops for `none`/`checklist`; idempotent match by the resolved identity key (`contracts/config-reconcile-interface.md` §projection)
+- [X] T016 [P] [US2] Unit test `tests/unit/mapping_identity_keys.bats` — a level projected to a standalone Issue or a Project (the #17 alternative) carries a stable filesystem-derived identity label so re-runs match/update rather than re-create (FR-009)
+- [X] T017 [US2] Implement `reconcile::sync_level_artifact` + `reconcile::link_to_parent` in `src/reconcile.sh` — mapping-driven create/update of the configured artifact with the configured relationship, reading artifact/relationship/identity from `config::resolved_*`; sub-issue nesting via `parent`; idempotent match by identity label (FR-003, FR-004, FR-009)
+- [X] T018 [US2] Wire `src/reconcile.sh` orchestration so `config::mapping_validate` (relationship matrix + required-id) runs before the write loop; a failure aborts the run with exit 2 and writes nothing (FR-007, FR-013, fail-closed)
 - [ ] T019 [US2] Integration test `tests/integration/mapping-us2-spec-as-project.bats` — a `mapping:` block of spec→Project, phase→Issue, task→sub-issue creates a Project per spec, an Issue per task phase, and a sub-issue per task with the configured parent relationships (#17 shape realised, spec scenario 1), AND a re-run against the unchanged corpus asserts **zero churn** (0 created / 0 updated) — the non-default arm of SC-004
 - [ ] T020 [US2] Integration test `tests/integration/mapping-us2-nonsensical-failclosed.bats` — a `mapping:` block with `blocks` used to nest a child, a `parent` on the top level, and a `checklist` artifact paired with a non-`checklist` relationship are each rejected at config-load with a clear error and zero writes (spec scenarios 2–3, SC-003)
 
@@ -146,8 +161,8 @@ partial blocks stay back-compatible.
 confirm the unspecified `repo`, `phase`, and `task` levels mirror exactly as the
 synthesized default would, with a zero-churn re-run.
 
-- [ ] T021 [P] [US3] Integration test `tests/integration/mapping-us3-partial-inherit.bats` — a `mapping:` block specifying only the `spec` level mirrors with `repo`/`phase`/`task` inheriting the synthesized default (repo→Project, phase→sub-issue, task→checklist) and only `spec` reflecting the override; a re-run with no disk changes performs zero writes (spec scenarios 1–2, SC-005)
-- [ ] T022 [US3] Confirm per-level inheritance (T008) drives the projection end-to-end through `src/reconcile.sh` — a partially-specified block resolves each unspecified level via `config::resolved_*` to the synthesized default; no all-or-nothing path remains (FR-005)
+- [X] T021 [P] [US3] Integration test `tests/integration/mapping-us3-partial-inherit.bats` — a `mapping:` block specifying only the `spec` level mirrors with `repo`/`phase`/`task` inheriting the synthesized default (repo→Project, phase→sub-issue, task→checklist) and only `spec` reflecting the override; a re-run with no disk changes performs zero writes (spec scenarios 1–2, SC-005)
+- [X] T022 [US3] Confirm per-level inheritance (T008) drives the projection end-to-end through `src/reconcile.sh` — a partially-specified block resolves each unspecified level via `config::resolved_*` to the synthesized default; no all-or-nothing path remains (FR-005)
 
 **Checkpoint**: US3 makes the grammar ergonomic — partial blocks just work, and a
 partial block equals the full block with the same overrides (SC-005).
@@ -167,12 +182,12 @@ narrative populated only from the explicit source; run against one that does not
 and confirm the narrative folds behind a stable marker with a grouping label and
 no hard failure.
 
-- [ ] T023 [P] [US4] Unit test `tests/unit/milestone_probe.bats` — `graphql::probe_milestone_support` returns `present`/`absent` from the Milestone-capability response; `graphql::ensure_milestone` creates the Milestone above the repo level with the narrative populated only from the explicit `spec_input` source, never inferred (FR-012), when present
-- [ ] T024 [P] [US4] Unit test `tests/unit/milestone_degrade.bats` — `graphql::degrade_milestone_onto_repo` folds the narrative onto the repo level behind a stable marker and carries repo grouping via a grouping label when absent; never hard-fails; re-runs in the degraded state are zero-churn and a later re-home onto a real Milestone is churn-free (FR-011, SC-006); the spec level stays the sole backward-drift anchor (FR-010)
-- [ ] T025 [US4] Implement `graphql::probe_milestone_support` + `graphql::ensure_milestone` in `src/graphql.sh` — gated on the resolved `super_level` state; populate narrative only from the explicit `spec_input` source (FR-011, FR-012)
-- [ ] T026 [US4] Implement `graphql::degrade_milestone_onto_repo` (+ re-home) in `src/graphql.sh` — stable-marker fold onto the repo level + grouping label when Milestones are absent; idempotent degrade↔re-home (FR-011)
-- [ ] T027 [US4] Wire the L0 super-level into `src/reconcile.sh` orchestration — when enabled, probe then create-or-degrade above the repo level; the super-level is NOT a new drift surface (FR-010); off by default leaves behaviour matching US1
-- [ ] T028 [US4] Integration test `tests/integration/mapping-us4-milestone.bats` — super-level on + Milestones available ⇒ a Milestone is created above the repo level (narrative from the explicit source only); on + unavailable ⇒ narrative folds onto the repo level behind a marker, repo grouping becomes a label, run succeeds; off ⇒ behaviour matches US1 (spec scenarios 1–3, SC-006)
+- [X] T023 [P] [US4] Unit test `tests/unit/milestone_probe.bats` — `graphql::probe_milestone_support` returns `present`/`absent` from the Milestone-capability response; `graphql::ensure_milestone` creates the Milestone above the repo level with the narrative populated only from the explicit `spec_input` source, never inferred (FR-012), when present
+- [X] T024 [P] [US4] Unit test `tests/unit/milestone_degrade.bats` — `graphql::degrade_milestone_onto_repo` folds the narrative onto the repo level behind a stable marker and carries repo grouping via a grouping label when absent; never hard-fails; re-runs in the degraded state are zero-churn and a later re-home onto a real Milestone is churn-free (FR-011, SC-006); the spec level stays the sole backward-drift anchor (FR-010)
+- [X] T025 [US4] Implement `graphql::probe_milestone_support` + `graphql::ensure_milestone` in `src/graphql.sh` — gated on the resolved `super_level` state; populate narrative only from the explicit `spec_input` source (FR-011, FR-012)
+- [X] T026 [US4] Implement `graphql::degrade_milestone_onto_repo` (+ re-home) in `src/graphql.sh` — stable-marker fold onto the repo level + grouping label when Milestones are absent; idempotent degrade↔re-home (FR-011)
+- [X] T027 [US4] Wire the L0 super-level into `src/reconcile.sh` orchestration — when enabled, probe then create-or-degrade above the repo level; the super-level is NOT a new drift surface (FR-010); off by default leaves behaviour matching US1
+- [X] T028 [US4] Integration test `tests/integration/mapping-us4-milestone.bats` — super-level on + Milestones available ⇒ a Milestone is created above the repo level (narrative from the explicit source only); on + unavailable ⇒ narrative folds onto the repo level behind a marker, repo grouping becomes a label, run succeeds; off ⇒ behaviour matches US1 (spec scenarios 1–3, SC-006)
 
 **Checkpoint**: US4 delivers the differentiating narrative super-level with
 graceful degradation.
@@ -185,10 +200,10 @@ graceful degradation.
 - [ ] T030 [P] yamllint clean on the updated config template + any fixture YAML
 - [X] T031 [P] markdownlint-clean across `specs/007-configurable-mapping/**/*.md` (`npx markdownlint-cli2`)
 - [ ] T032 [P] Extend `tests/unit/no-real-identifiers.bats` coverage over the new fixtures (`milestone_meta/`, `mapping_configs/`, the template `mapping:` block); confirm placeholders only (FR-018)
-- [ ] T033 [P] Update `README.md` — reframe the mapping table (~L138) + cover line as the **default** mapping and document the opt-in `mapping:` block (the #17 spec→Project shape, partial inheritance, the L0 Milestone super-level); keep the auto-sync flow first (Principle VII) — constitution v2.1.0 propagation
+- [X] T033 [P] Update `README.md` — reframe the mapping table (~L138) + cover line as the **default** mapping and document the opt-in `mapping:` block (the #17 spec→Project shape, partial inheritance, the L0 Milestone super-level); keep the auto-sync flow first (Principle VII) — constitution v2.1.0 propagation
 - [X] T034 [P] Update `CONTRIBUTING.md` (L8) — "locked data-model mapping" → "default data-model mapping (configurable per spec 007)" — constitution v2.1.0 propagation
 - [X] T035 [P] Update `CHANGELOG.md` (Unreleased: configurable artifact mapping — alias default, per-level mapping + relationship-validation matrix, #17 spec→Project shape, partial inheritance, optional L0 Milestone super-level; constitution v2.1.0)
-- [ ] T036 [P] Validate `specs/007-configurable-mapping/quickstart.md` against the shipped behaviour (default, #17 shape, partial, L0) and correct any drift
+- [X] T036 [P] Validate `specs/007-configurable-mapping/quickstart.md` against the shipped behaviour (default, #17 shape, partial, L0) and correct any drift
 - [ ] T037 Run the exact CI locally (shellcheck `--severity=style` + yamllint + markdownlint + bats unit + integration) and fix to green before pushing; ubuntu CI is authoritative over macOS for any GNU/BSD difference
 
 ---

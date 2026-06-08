@@ -336,6 +336,61 @@ needed; absence is a config error (FR-009).
   the reconcile engine selects the query path (Project vs Issue) based on the
   resolved mapping's `artifact` field, not the prefix value.
 
+### 5.3 Identity for non-issue levels — description marker
+
+The §5.1 label mechanism applies **only to Issue and sub-issue levels**. Linear
+Initiatives and Projects do not carry issue labels, so a different identity
+mechanism is required for those artifact types.
+
+**Mechanism:** for any level that projects to an Initiative or a Project, the
+bridge embeds a stable HTML comment in the artifact's `description` field of
+the exact form:
+
+```text
+<!-- speckit-id: <prefix><key> -->
+```
+
+The marker is **filesystem-derived** (slug or spec number), never minted from
+Linear state — preserving Principle II. On each run the bridge lists the
+relevant artifacts (initiatives for Initiative levels, a team's projects for
+Project levels) and filters on the marker substring. This yields zero, one, or
+more matches:
+
+- **0 matches** — create the artifact with the marker embedded in the description.
+- **1 match** — update the artifact if content has changed; skip (zero churn) if
+  unchanged.
+- **>1 matches** — resolve duplicates using the existing
+  `resolve_or_archive_duplicates` shape (mark losing duplicates by removing their
+  description marker).
+
+**Per-level identity mechanism summary:**
+
+| Level / artifact | Identity mechanism |
+|---|---|
+| repo → **Project** (default) | bound `linear.project.id` config UUID — unchanged |
+| repo → **Initiative** (#17 or L0) | description marker `<!-- speckit-id: speckit-repo:<slug> -->` |
+| spec → **Project** (#17) | description marker `<!-- speckit-id: speckit-spec:<NNN> -->` |
+| spec → **Issue** (default) | `speckit-spec:<NNN>` label — unchanged (§5.1) |
+| phase → **Issue** (#17) | `task-phase:<N>` label scoped to the parent Project — unchanged |
+| phase → **sub-issue** (default) | `task-phase:<N>` label + parent issue — unchanged (§5.1) |
+| task → **sub-issue** (#17) | `speckit-task:<task-id>` label + parent issue |
+| task → **checklist** (default) | in-body render keyed by task identity — unchanged |
+
+**Linking a spec→Project under a repo→Initiative** uses the `projectUpdate`
+mutation with `addInitiativeIds: [<initiative-id>]`. This operation is
+idempotent — it is skipped when the Project is already linked to the target
+Initiative, producing zero churn on unchanged state.
+
+**Marker lifecycle notes:**
+
+- The marker is appended to the artifact description on creation and preserved
+  on subsequent updates; it MUST NOT be deleted by operators (see quickstart §17
+  note).
+- The marker format is fixed: `<!-- speckit-id: <value> -->` where `<value>` is
+  the prefix plus key with no extra whitespace inside the comment.
+- Description markers are not used for Issue or sub-issue levels — those levels
+  continue to use the §5.1 label mechanism.
+
 ---
 
 ## 6. Narrative source (explicit spec-input origin)

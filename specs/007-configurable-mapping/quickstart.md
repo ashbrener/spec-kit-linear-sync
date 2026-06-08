@@ -85,6 +85,19 @@ entirely through the `mapping:` grammar — no code change. The `spec` level
 carries a stable `speckit-spec:NNN` label as its filesystem-derived identity
 so re-runs match and update rather than re-create.
 
+**Initiative and Project identity — description marker:** because Initiatives
+and Projects do not carry issue labels, the bridge identifies them via a stable
+HTML comment embedded in their `description` field, for example:
+
+```text
+<!-- speckit-id: speckit-repo:<slug> -->   ← repo-level Initiative
+<!-- speckit-id: speckit-spec:<NNN> -->    ← spec-level Project
+```
+
+The marker is matched on every run to decide create / update / no-op. Do not
+delete or modify this line in the Linear UI — removing it causes the bridge to
+treat the artifact as new and create a duplicate on the next push.
+
 ---
 
 ## 3. Partial mapping (per-level inheritance)
