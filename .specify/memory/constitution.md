@@ -1,6 +1,60 @@
 <!--
 SYNC IMPACT REPORT
 ==================
+Version change: 2.0.0 → 2.1.0
+Amendment date: 2026-06-08
+
+Rationale (why MINOR, not MAJOR): This amendment ADDS a new, bounded
+constitutional constraint (operator-configurable artifact mapping) without
+redefining or removing the existing locked mapping. Per the versioning rules
+below, MAJOR is reserved for "redefining the data-model mapping"; this
+amendment does the opposite — it PRESERVES the spec-001 mapping byte-for-byte
+as the frozen zero-config default (an alias layer synthesizes it when no
+`mapping:` block is present; no file rewrite, no config-version bump, zero
+behaviour change for any installed repo) and merely exposes an additive,
+fail-closed opt-in surface above it. A backward-compatible addition that
+changes nothing for existing installs is MINOR ("adding a new constitutional
+constraint").
+
+Constraint amended (Architectural Constraints → data-model mapping clause):
+  - WAS: "The data-model mapping locked in spec 001 ... is constitutional.
+    Amending it is a MAJOR version bump."
+  - NOW: the spec-001 mapping is the FROZEN ZERO-CONFIG DEFAULT (redefining
+    or removing it stays MAJOR); spec 007 adds a BOUNDED opt-in `mapping:`
+    block (alias-synthesized default when absent; offline relationship-
+    validation matrix, fail-closed; all logic in the source-agnostic config
+    layer). Adding/narrowing/widening this configurability surface is MINOR.
+  - WHY: resolves design issue #17 (spec-as-Project vs spec-as-Issue) as a
+    configurable choice rather than a one-off, and ports the spec-kit-jira
+    `specs/002-configurable-mapping` model so the two sinks share one
+    workstate→sink grammar (007 FR-015 / SC-007). Implemented by spec 007
+    (`007-configurable-mapping`).
+
+Principles (I–VIII): all UNCHANGED. No principle added, removed, or redefined.
+
+Sections touched by this amendment:
+  - Architectural Constraints → data-model mapping clause (expanded)
+  - Version footer (2.0.0 → 2.1.0; Last Amended 2026-06-08)
+
+Templates / dependent docs to propagate (forward-facing only; folded into
+spec 007's implementation per its docs FRs, not point-in-time records):
+  ⏳ README.md — mapping table (~L138) + cover line: reframe as the DEFAULT
+     mapping and note the opt-in `mapping:` block.
+  ⏳ CONTRIBUTING.md (L8) — "locked data-model mapping" → "default data-model
+     mapping (configurable per spec 007)".
+  ✅ .specify/templates/*.md — no data-model-mapping references; nothing to sync.
+
+Parity note: the spec-kit-jira sink carries the identical "mapping is
+constitutional" clause but resolved its `002-configurable-mapping` feature via
+the no-amendment "additive PASS" path (still v1.0.0). This amendment makes the
+Linear constitution explicit; the SAME MINOR amendment should be backported to
+the Jira constitution to restore cross-sink governance parity (follow-up).
+
+Deliberately NOT modified (point-in-time historical records):
+  ⛔ specs/001-spec-kit-linear-bridge/** — defined the original locked mapping.
+  ⛔ specs/00{2,3,4,5,6}-*/** , CHANGELOG.md, validation/** — historical.
+
+==================
 Version change: 1.0.0 → 2.0.0
 Amendment date: 2026-05-28
 
@@ -333,8 +387,32 @@ bridge enough to leave its hooks `optional: false`.
 The data-model mapping locked in spec 001 — consumer repo → Linear
 Project; spec → Linear Issue; task phase → sub-issue; tasks →
 checklist items; non-task artifacts → spec-Issue comments; lifecycle
-state → spec-Issue workflow state + `phase:*` label — is
-constitutional. Amending it is a MAJOR version bump.
+state → spec-Issue workflow state + `phase:*` label — is the **frozen
+zero-config default**: it is exactly what every install produces when
+no `mapping:` configuration is present. **Redefining or removing that
+default is a MAJOR version bump.**
+
+As of spec 007 (`007-configurable-mapping`), an operator MAY opt in to
+an alternative mapping via an additive `mapping:` block in the per-repo
+binding (e.g. the spec→Project shape that resolves design issue #17).
+This configurability is **bounded, not open-ended**:
+
+- The default above is preserved byte-for-byte when no `mapping:` block
+  is present — an alias layer synthesizes it from the existing binding
+  keys, with no file rewrite and no config-version bump, so every
+  pre-007 install behaves identically (this is why 007 is a
+  backward-compatible MINOR amendment, not a MAJOR one: the default is
+  not redefined, only an opt-in surface is added).
+- Every configured (level-boundary × relationship) combination MUST
+  pass the offline relationship-validation matrix at config-load and
+  fail closed (Principle VIII) before any write; nonsensical hierarchy
+  links are rejected with nothing written.
+- All mapping, alias-layer, and validation logic MUST live in the
+  source-agnostic configuration layer; the vendor-neutral reconcile
+  engine stays free of mapping knowledge.
+
+Adding, narrowing, or widening this bounded configurability surface is
+a MINOR amendment. Changing the default it falls back to remains MAJOR.
 
 Layer responsibility boundaries (Principle III) are constitutional.
 Layer E mutates ONLY the spec Issue's workflow state; Layer D owns
@@ -399,4 +477,4 @@ either an explicit spec clarification or the validation outputs;
 Principle IV's v2.0.0 redefinition derives from spec 003
 (`003-drift-aware-authority`) and the downstream dogfood evidence.
 
-**Version**: 2.0.0 | **Ratified**: 2026-05-27 | **Last Amended**: 2026-05-28
+**Version**: 2.1.0 | **Ratified**: 2026-05-27 | **Last Amended**: 2026-06-08
