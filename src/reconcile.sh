@@ -99,20 +99,31 @@ source "${SCRIPT_DIR}/parser.sh"
 # every consumer repo's invocation.
 readonly RECONCILE_CONFIG_PATH_DEFAULT=".specify/extensions/linear/linear-config.yml"
 
-# Cap on the verbatim Overview body before we truncate to the first
-# paragraph (split on `\n\n`) + ellipsis. Linear descriptions are
-# already long with the memory block; keeping this under
-# 1500 chars preserves the at-a-glance value the block is meant to add.
-readonly RECONCILE_OVERVIEW_MAX_CHARS=1500
+# Cap on the TOTAL inlined spec-content body (#42 / FR-008, FR-010).
+# The bridge inlines the spec's own authored content — its `**Input**`
+# line, its `## Overview`, and additional body sections in document
+# order — so a Linear Issue born from a rich spec file is self-contained
+# (the operator does not have to leave Linear to read what they wrote).
+# This total cap bounds the full inlined body so the description stays
+# within Linear's tracker limits and readable. When the spec's content
+# exceeds this cap it is truncated at a clean line boundary (FR-010) with
+# a truncation indicator and the always-present full-spec link (FR-009).
+# Truncation is deterministic — a function of the on-disk bytes only, no
+# timestamps — so an oversized spec reconciled twice unchanged never flips
+# between truncated and untruncated states (FR-013 / SC-005).
+readonly RECONCILE_SPEC_CONTENT_MAX_CHARS=6000
 
 # Bridge-owned description policy (FR-004, FR-016): the spec Issue's
 # description body is fully owned and rewritten by the bridge on every
-# reconcile, in canonical order: overview → memory. There
+# reconcile, in canonical order: spec-content → memory. There
 # are no fence markers — Linear renders HTML comments and `<details>`
 # tags as visible text nodes (probed empirically on ACM-14), so any
 # fence shape would leak as literal markup in Linear's UI. Operator
 # annotations belong in Linear comments (FR-008), which the bridge
-# never touches.
+# never touches. The inlined spec content is a READ-ONLY MIRROR of
+# spec.md — re-derived from disk on every reconcile — so hand-edits in
+# Linear are overwritten (FR-014); the link to the full spec is always
+# present (FR-009).
 
 # Header preface for task-phase sub-issue descriptions (FR-006). The
 # one-way semantics must be impossible to miss per spec. Backticks here
@@ -776,6 +787,104 @@ reconcile::_extract_overview() {
 }
 
 # =============================================================================
+# reconcile::_extract_input <spec_md_path>
+#
+# Echo the spec's authored Input description to stdout (#42 / FR-007).
+# The spec-kit template records the operator's original feature
+# description on a single front-matter line of the form:
+#
+#   **Input**: User description: "<the operator's words>"
+#
+# This helper returns the value after `**Input**:` (the
+# `User description: "..."` text included), trimmed. Multi-line Input
+# values (rare — some specs wrap the description across lines) are
+# joined: every line from the `**Input**:` line up to the next blank
+# line or `##` heading is included, so the full authored description is
+# inlined. Empty output when the spec has no `**Input**` line (graceful
+# degradation — older fixtures and hand-written specs may omit it).
+# =============================================================================
+reconcile::_extract_input() {
+    local spec_md="$1"
+    [[ -f "$spec_md" ]] || return 0
+
+    awk '
+        BEGIN { in_input = 0 }
+        # Start at the **Input**: front-matter line. Strip the bold
+        # label so only the authored value remains.
+        /^\*\*Input\*\*:/ {
+            line = $0
+            sub(/^\*\*Input\*\*:[[:space:]]*/, "", line)
+            print line
+            in_input = 1
+            next
+        }
+        # A continuation: subsequent non-blank, non-heading lines that
+        # belong to a wrapped Input value (until a blank line or a
+        # heading terminates the front-matter block).
+        in_input {
+            if ($0 ~ /^[[:space:]]*$/ || $0 ~ /^#/) { exit }
+            print
+        }
+    ' "$spec_md" | awk '
+        # Trim trailing blank lines / whitespace-only tail.
+        { buf[NR] = $0; last = NR }
+        END {
+            while (last > 0 && buf[last] ~ /^[[:space:]]*$/) { last-- }
+            for (i = 1; i <= last; i++) { if (i in buf) print buf[i] }
+        }
+    '
+}
+
+# =============================================================================
+# reconcile::_extract_spec_body_after_overview <spec_md_path>
+#
+# Echo additional authored spec body that follows the `## Overview`
+# section, in document order, to stdout (#42 / FR-008). Used to inline
+# "more of the spec body beyond Input/Overview" when the total content
+# fits under the cap. Boundaries: emission starts at the FIRST H2
+# heading after Overview and runs to end-of-file. Bridge-irrelevant
+# nothing is filtered here — the caller applies the size cap and clean
+# truncation (FR-010), so this stays a pure document-order extractor.
+# Empty output when there is no `## Overview` or nothing follows it.
+# =============================================================================
+reconcile::_extract_spec_body_after_overview() {
+    local spec_md="$1"
+    [[ -f "$spec_md" ]] || return 0
+
+    awk '
+        BEGIN { seen_overview = 0; emitting = 0 }
+        /^#+[[:space:]]+/ {
+            n = 0; line = $0
+            while (substr(line, n + 1, 1) == "#") { n++ }
+            title = substr(line, n + 1)
+            sub(/^[[:space:]]+/, "", title)
+            sub(/[[:space:]]+$/, "", title)
+            if (seen_overview == 0 && (n == 1 || n == 2) && title == "Overview") {
+                seen_overview = 1
+                next
+            }
+            # First same-or-shallower heading AFTER Overview starts the
+            # additional-body region.
+            if (seen_overview == 1 && emitting == 0 && n <= 2) {
+                emitting = 1
+            }
+        }
+        emitting { print }
+    ' "$spec_md" | awk '
+        # Trim leading + trailing blank lines.
+        BEGIN { started = 0 }
+        {
+            if (started == 0 && $0 ~ /^[[:space:]]*$/) { next }
+            started = 1; buf[NR] = $0; last = NR
+        }
+        END {
+            while (last > 0 && buf[last] ~ /^[[:space:]]*$/) { last-- }
+            for (i = 1; i <= last; i++) { if (i in buf) print buf[i] }
+        }
+    '
+}
+
+# =============================================================================
 # reconcile::_github_base_url
 #
 # Echo the consumer repo's https://github.com/<owner>/<repo> URL on
@@ -805,62 +914,108 @@ reconcile::_github_base_url() {
 }
 
 # =============================================================================
-# reconcile::render_overview_block <spec_dir>
+# reconcile::render_spec_content_block <spec_dir>
 #
 # Build the markdown body for the spec Issue's `## What this spec does`
-# block (Fix 7 — the human-readable Overview pointer). Sourced verbatim
-# from spec.md's `## Overview` section so a developer scanning the
-# Linear Issue sees what the spec actually does without opening
-# spec.md on GitHub. The caller (compose_issue_description) concatenates
-# this block into the bridge-owned description body.
+# block by INLINING the spec's OWN authored content (#42 / FR-007..
+# FR-010), so a reader scanning the Linear Issue sees what the spec
+# actually says without leaving Linear to open spec.md. The caller
+# (compose_issue_description) concatenates this block into the
+# bridge-owned, read-only description body (FR-014).
 #
-# Length handling: if the extracted Overview exceeds
-# RECONCILE_OVERVIEW_MAX_CHARS (1500), truncate to the FIRST paragraph
-# (split on `\n\n`), append an ellipsis, and the "Read full spec on
-# GitHub →" link as usual. Under cap → emit verbatim. The link line
-# ALWAYS appears.
+# Content order (document order, FR-007/FR-008):
+#   1. the spec's `**Input**` description (the operator's own words),
+#   2. the `## Overview` section body,
+#   3. additional `##` body sections that follow Overview, up to the cap.
 #
-# Empty Overview (spec.md has no `## Overview` heading) → echo nothing
-# (caller skips the block) and surface a one-shot warned summary line
-# per reconcile run so the operator knows why the block is missing.
+# A link to the full spec is ALWAYS appended (FR-009), whether or not
+# the content was truncated.
+#
+# Size cap + truncation (FR-010 / FR-013): the assembled content is
+# capped at RECONCILE_SPEC_CONTENT_MAX_CHARS. When it exceeds the cap it
+# is truncated at a CLEAN LINE BOUNDARY (never mid-line) and a single
+# `…` truncation indicator line is appended before the link. Truncation
+# is a pure function of the on-disk bytes (no timestamps / no env), so
+# an oversized spec reconciled twice unchanged yields a byte-identical
+# block both runs (idempotent under truncation, SC-005).
+#
+# Graceful degradation (FR-016): a spec with no `## Overview` still
+# inlines what it can (its Input) and surfaces the existing one-shot
+# "no Overview" warning. When NEITHER Input nor Overview exists the
+# block is empty (caller skips it) and the warning fires.
 # =============================================================================
-reconcile::render_overview_block() {
+reconcile::render_spec_content_block() {
     local spec_dir="$1"
     local spec_md="${spec_dir%/}/spec.md"
 
-    local overview_body
+    local input_body overview_body extra_body
+    input_body="$(reconcile::_extract_input "$spec_md")"
     overview_body="$(reconcile::_extract_overview "$spec_md")"
 
+    # The "no Overview" warning is preserved (FR-016) — it fires whenever
+    # the Overview section is absent, exactly as before. Inlining still
+    # proceeds with whatever content remains (the Input).
     if [[ -z "$overview_body" ]]; then
         if (( _RECONCILE_OVERVIEW_WARNED == 0 )); then
-            summary::add warned "overview block skipped: spec.md has no \`## Overview\` section (one or more specs)"
+            summary::add warned "overview block: spec.md has no \`## Overview\` section (one or more specs) — inlining Input only"
             _RECONCILE_OVERVIEW_WARNED=1
         fi
+    fi
+
+    # Nothing authored to inline at all → emit nothing (caller skips the
+    # block). The link-only legacy behaviour is gone: a spec with no
+    # Input AND no Overview has no own-content to mirror.
+    if [[ -z "$input_body" && -z "$overview_body" ]]; then
         return 0
     fi
 
-    # Truncate to first paragraph + ellipsis when over cap. The cap is
-    # measured against the raw (untruncated) body's char count; the
-    # truncated form re-uses the FIRST `\n\n`-delimited paragraph.
-    local body_chars=${#overview_body}
-    if (( body_chars > RECONCILE_OVERVIEW_MAX_CHARS )); then
-        # Use awk to grab everything up to (but not including) the
-        # first fully-blank line. Append a single ellipsis line so the
-        # reader knows there's more.
-        local first_para
-        first_para="$(printf '%s\n' "$overview_body" | awk '
-            /^[[:space:]]*$/ { exit }
-            { print }
-        ')"
-        overview_body="${first_para}"$'\n\n…'
+    # Assemble the spec's own content in document order. Each present
+    # section gets a labelled sub-heading so the inlined body reads
+    # cleanly inside the Issue. Additional body (post-Overview) is only
+    # pulled in when an Overview exists (it is defined relative to it).
+    local content=""
+    if [[ -n "$input_body" ]]; then
+        content+="**Input**"$'\n\n'"${input_body}"$'\n\n'
+    fi
+    if [[ -n "$overview_body" ]]; then
+        content+="### Overview"$'\n\n'"${overview_body}"$'\n\n'
+        extra_body="$(reconcile::_extract_spec_body_after_overview "$spec_md")"
+        if [[ -n "$extra_body" ]]; then
+            content+="${extra_body}"$'\n\n'
+        fi
     fi
 
-    # Build the "Read full spec on GitHub →" link. The base URL +
-    # current branch + spec.md path resolves to a blob URL the reader
-    # can click straight into. When the remote isn't GitHub-shaped the
-    # link line falls back to a code-span pointer to the on-disk path
-    # so the block remains useful (it's the Overview body, not the
-    # link, that's load-bearing).
+    # Trim trailing blank lines from the assembled content.
+    while [[ "$content" == *$'\n' ]]; do
+        content="${content%$'\n'}"
+    done
+
+    # Clean-boundary truncation at the cap (FR-010 / FR-013). Measured
+    # against the assembled content's char count; truncation keeps whole
+    # lines only (cut at the last newline at-or-before the cap) so the
+    # body never ends mid-line, and is deterministic across runs.
+    local truncated=0
+    if (( ${#content} > RECONCILE_SPEC_CONTENT_MAX_CHARS )); then
+        truncated=1
+        local head="${content:0:RECONCILE_SPEC_CONTENT_MAX_CHARS}"
+        # Back up to the last newline so we end on a clean line boundary.
+        # If there is no newline in the window (one giant line), fall
+        # back to the hard char cut — still deterministic.
+        if [[ "$head" == *$'\n'* ]]; then
+            head="${head%$'\n'*}"
+        fi
+        # Drop any trailing blank lines left by the cut.
+        while [[ "$head" == *$'\n' ]]; do
+            head="${head%$'\n'}"
+        done
+        content="$head"
+    fi
+
+    # Build the "Read full spec on GitHub →" link (FR-009 — ALWAYS
+    # present). The base URL + current branch + spec.md path resolves to
+    # a blob URL the reader can click straight into. When the remote
+    # isn't GitHub-shaped the link line falls back to a code-span pointer
+    # to the on-disk path so the block stays useful.
     local base_url current_branch link_line
     base_url="$(reconcile::_github_base_url)"
     current_branch="$(git_helpers::current_branch 2>/dev/null || true)"
@@ -873,21 +1028,36 @@ reconcile::render_overview_block() {
         link_line="\`(local: ${spec_md})\`"
     fi
 
+    # Truncation indicator (FR-010) — a single ellipsis line that names
+    # the link as the way to read the rest.
+    local trunc_line=""
+    if (( truncated == 1 )); then
+        trunc_line=$'\n\n'"… *(truncated — read the full spec via the link below)*"
+    fi
+
     cat <<EOF
 ## What this spec does
 
-${overview_body}
+${content}${trunc_line}
 
 ${link_line}
 EOF
 }
 
+# Backward-compatible alias. The block was renamed render_overview_block
+# → render_spec_content_block when #42 broadened it from an Overview
+# excerpt to full inlined spec content. Retained so any external caller
+# or test that still references the old name keeps working.
+reconcile::render_overview_block() {
+    reconcile::render_spec_content_block "$@"
+}
+
 # =============================================================================
-# reconcile::compose_issue_description <overview_block> <memory_block>
+# reconcile::compose_issue_description <spec_content_block> <memory_block>
 #
 # Build the spec Issue description from scratch in canonical order:
 #
-#   overview → memory
+#   spec-content → memory
 #
 # The bridge fully owns the description body (FR-004, FR-016): any
 # prior content in Linear is discarded on every reconcile. Operator
@@ -898,10 +1068,11 @@ EOF
 # markup. The unidirectional, bridge-owned policy makes the per-fence
 # splice machinery unnecessary.
 #
-# <overview_block> may be empty:
-#   - empty overview → no `## Overview` heading in spec.md
-# In that case we omit the block entirely (graceful degradation).
-# The memory block is mandatory.
+# <spec_content_block> may be empty:
+#   - empty when spec.md has neither an `**Input**` line nor an
+#     `## Overview` heading (#42 / FR-016 graceful degradation).
+# In that case we omit the block entirely. The memory block is
+# mandatory.
 # =============================================================================
 reconcile::compose_issue_description() {
     local overview_block="$1"
@@ -1786,12 +1957,12 @@ reconcile::sync_spec_issue() {
         spec_estimate=""
     fi
 
-    # Compose the overview + memory blocks into a final body.
+    # Compose the inlined spec-content + memory blocks into a final body.
     local memory_block overview_block
     memory_block="$(reconcile::render_memory_block \
         "$feature_number" "$short_name" "$lifecycle_phase" \
         "$spec_dir" "$feature_branch")"
-    overview_block="$(reconcile::render_overview_block "$spec_dir")"
+    overview_block="$(reconcile::render_spec_content_block "$spec_dir")"
 
     # Locate the existing spec Issue (FR-004b).
     local nodes

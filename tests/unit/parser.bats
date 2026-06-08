@@ -346,18 +346,22 @@ EOF
 # parser::phase_header_near_misses
 # ---------------------------------------------------------------------------
 
-@test "phase_header_near_misses: 006 flags both em-dash phase headers" {
+# #34 / FR-005: after broadening the grammar, em-dash headers are
+# ACCEPTED, so they are no longer near-misses. (Was the opposite pre-#34.)
+@test "phase_header_near_misses: 006 em-dash headers are NOT near-misses (now accepted)" {
     run parser::phase_header_near_misses "${FIXTURES}/006-emdash-phases/tasks.md"
     [ "$status" -eq 0 ]
-    [ "${#lines[@]}" -eq 2 ]
-    [[ "${lines[0]}" == *"## Phase 1 — Setup"* ]]
-    [[ "${lines[1]}" == *"## Phase 2 — Foundational"* ]]
+    [ -z "$output" ]
 }
 
-@test "phase_header_near_misses: 006 em-dash headers still parse to ZERO phases (grammar unchanged)" {
+# #34 / FR-001: em-dash headers now parse to the same phase number + name
+# the colon form would have produced.
+@test "task_phases: 006 em-dash headers parse to two phases (broadened grammar)" {
     run parser::task_phases "${FIXTURES}/006-emdash-phases/tasks.md"
     [ "$status" -eq 0 ]
-    [ -z "$output" ]
+    [ "${#lines[@]}" -eq 2 ]
+    [ "${lines[0]}" = $'1\tSetup' ]
+    [ "${lines[1]}" = $'2\tFoundational' ]
 }
 
 @test "phase_header_near_misses: 002 (canonical colon headers) flags nothing" {
@@ -370,6 +374,166 @@ EOF
     run parser::phase_header_near_misses "/nonexistent/tasks.md"
     [ "$status" -eq 0 ]
     [ -z "$output" ]
+}
+
+# ---------------------------------------------------------------------------
+# #34 — broadened phase-header separator grammar (FR-001..FR-006)
+# ---------------------------------------------------------------------------
+
+# FR-002 / SC-002: every separator form yields the IDENTICAL phase
+# number + name as the canonical colon form.
+@test "task_phases: colon, em-dash, hyphen, and bare forms are identical" {
+    local tmp
+    tmp="$(mktemp -d)"
+    cat > "${tmp}/colon.md"  <<'EOF'
+## Phase 1: Setup
+## Phase 2: Core
+## Phase 3: Polish
+EOF
+    cat > "${tmp}/emdash.md" <<'EOF'
+## Phase 1 — Setup
+## Phase 2 — Core
+## Phase 3 — Polish
+EOF
+    cat > "${tmp}/hyphen.md" <<'EOF'
+## Phase 1 - Setup
+## Phase 2 - Core
+## Phase 3 - Polish
+EOF
+    cat > "${tmp}/bare.md"   <<'EOF'
+## Phase 1 Setup
+## Phase 2 Core
+## Phase 3 Polish
+EOF
+    local expected
+    expected="$(parser::task_phases "${tmp}/colon.md")"
+    [ "$expected" = $'1\tSetup\n2\tCore\n3\tPolish' ]
+    [ "$(parser::task_phases "${tmp}/emdash.md")" = "$expected" ]
+    [ "$(parser::task_phases "${tmp}/hyphen.md")" = "$expected" ]
+    [ "$(parser::task_phases "${tmp}/bare.md")"   = "$expected" ]
+    rm -rf "$tmp"
+}
+
+# FR-001 acceptance scenario 2: hyphen + bare in one file.
+@test "task_phases: hyphen and bare-whitespace headers both parse" {
+    local tmp
+    tmp="$(mktemp -d)"
+    cat > "${tmp}/tasks.md" <<'EOF'
+## Phase 2 - Core
+## Phase 3 Polish
+EOF
+    run parser::task_phases "${tmp}/tasks.md"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 2 ]
+    [ "${lines[0]}" = $'2\tCore' ]
+    [ "${lines[1]}" = $'3\tPolish' ]
+    rm -rf "$tmp"
+}
+
+# Edge case: extra whitespace around the em-dash trims to the tight name
+# (FR-006).
+@test "task_phases: spaced separators trim to the same name" {
+    local tmp
+    tmp="$(mktemp -d)"
+    printf '## Phase 1  —  Setup\n' > "${tmp}/tasks.md"
+    run parser::task_phases "${tmp}/tasks.md"
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = $'1\tSetup' ]
+    rm -rf "$tmp"
+}
+
+# Edge case: a header with no name (number only, or trailing separator)
+# yields the number with an empty name.
+@test "task_phases: number-only and trailing-separator headers yield empty name" {
+    local tmp
+    tmp="$(mktemp -d)"
+    cat > "${tmp}/tasks.md" <<'EOF'
+## Phase 1
+## Phase 2 —
+EOF
+    run parser::task_phases "${tmp}/tasks.md"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 2 ]
+    [ "${lines[0]}" = $'1\t' ]
+    [ "${lines[1]}" = $'2\t' ]
+    rm -rf "$tmp"
+}
+
+# Multi-digit phase numbers across separators.
+@test "task_phases: multi-digit phase numbers parse across separators" {
+    local tmp
+    tmp="$(mktemp -d)"
+    cat > "${tmp}/tasks.md" <<'EOF'
+## Phase 10 — Ten
+## Phase 11: Eleven
+EOF
+    run parser::task_phases "${tmp}/tasks.md"
+    [ "$status" -eq 0 ]
+    [ "${lines[0]}" = $'10\tTen' ]
+    [ "${lines[1]}" = $'11\tEleven' ]
+    rm -rf "$tmp"
+}
+
+# tasks_in_phase honours the broadened grammar — a phase selected by
+# index collects its tasks regardless of the header's separator.
+@test "tasks_in_phase: collects tasks under an em-dash header" {
+    local tmp
+    tmp="$(mktemp -d)"
+    cat > "${tmp}/tasks.md" <<'EOF'
+## Phase 1 — Setup
+- [ ] T1 First
+- [x] T2 Second
+## Phase 2 - Core
+- [ ] T3 Third
+EOF
+    run parser::tasks_in_phase "${tmp}/tasks.md" 1
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 2 ]
+    [ "${lines[0]}" = $'T1\tunchecked\tFirst\t' ]
+    [ "${lines[1]}" = $'T2\tchecked\tSecond\t' ]
+    run parser::tasks_in_phase "${tmp}/tasks.md" 2
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 1 ]
+    [ "${lines[0]}" = $'T3\tunchecked\tThird\t' ]
+    rm -rf "$tmp"
+}
+
+# FR-004 / FR-005 / US2: a worded number stays a near-miss; its tasks are
+# flagged as outside any phase; accepted headers raise NO near-miss.
+@test "phase_header_near_misses: worded number stays a near-miss; accepted forms do not" {
+    local tmp
+    tmp="$(mktemp -d)"
+    cat > "${tmp}/tasks.md" <<'EOF'
+## Phase 1 — Setup
+- [ ] T1 Accepted task
+## Phase one: Setup
+- [ ] T2 Worded-number task
+EOF
+    run parser::phase_header_near_misses "${tmp}/tasks.md"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 1 ]
+    [[ "${lines[0]}" == *"## Phase one: Setup"* ]]
+    # The accepted em-dash header parses; the worded-number one does not.
+    run parser::task_phases "${tmp}/tasks.md"
+    [ "${#lines[@]}" -eq 1 ]
+    [ "${lines[0]}" = $'1\tSetup' ]
+    rm -rf "$tmp"
+}
+
+# FR-004 edge: a "## Phase" line with no extractable number at all.
+@test "phase_header_near_misses: number-absent and glued-name lines are near-misses" {
+    local tmp
+    tmp="$(mktemp -d)"
+    cat > "${tmp}/tasks.md" <<'EOF'
+## Phase: Setup
+## Phase 1Setup
+EOF
+    run parser::phase_header_near_misses "${tmp}/tasks.md"
+    [ "$status" -eq 0 ]
+    [ "${#lines[@]}" -eq 2 ]
+    run parser::task_phases "${tmp}/tasks.md"
+    [ -z "$output" ]
+    rm -rf "$tmp"
 }
 
 # ---------------------------------------------------------------------------
