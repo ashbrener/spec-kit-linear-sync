@@ -448,6 +448,14 @@ reconcile::load_config() {
     # failure).
     config::load "$path"
     config::validate
+    # spec 007 — validate the (optional) configurable artifact mapping at
+    # config-load, before any write. Absent `mapping:` block ⇒ the alias layer
+    # synthesizes today's default and this passes unchanged (FR-001/FR-002); a
+    # nonsensical mapping (bad relationship, checklist misuse, parent on the top
+    # level) hard-halts here with exit 2 and nothing written (FR-007, FR-013,
+    # Principle VIII). The reconcile projection consumes the resolved mapping
+    # via the config::resolved_* accessors (FR-014).
+    config::mapping_validate
     reconcile::log "config loaded from ${path}"
 }
 
