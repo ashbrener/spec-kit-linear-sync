@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Configurable artifact mapping — spec 007 (in progress)
+
+Resolves the #17 design question ("should a spec become a Project or an Issue?")
+by making the spec→Linear mapping operator-configurable, while keeping the
+spec-001 mapping (repo→Project, spec→Issue, phase→sub-issue, task→checklist) as
+the **frozen zero-config default** — existing installs are byte-for-byte
+unchanged (no file rewrite, no config-version bump).
+
+- **Constitution v2.0.0 → v2.1.0 (MINOR).** The data-model-mapping clause now
+  names the spec-001 mapping the frozen default and permits a bounded, opt-in
+  configurability surface (alias-synthesized default when absent; offline,
+  fail-closed relationship + Linear-native containment validation; all logic in
+  the source-agnostic config layer).
+- **Config layer (shipped).** An optional `mapping:` block in `linear-config.yml`
+  lets you set, per spec-kit level (repo/spec/phase/task), the Linear artifact
+  and its parent relationship, plus an off-by-default narrative super-level (L0).
+  The config layer resolves it (with per-level inheritance from the synthesized
+  default) and validates it at config-load, failing closed before any write on
+  nonsensical mappings — `blocks`/`relates` as nesting, `parent` on the top
+  level, checklist misuse, or a hierarchy Linear cannot build (e.g.
+  Project-under-Project). Linear's real hierarchy is honoured:
+  `Initiative > Project > Issue > sub-issue` (the narrative super-level is an
+  Initiative — Linear Milestones live inside a Project and cannot contain one).
+  The #17 spec-as-Project shape is `repo→Initiative, spec→Project, phase→Issue,
+  task→sub-issue`.
+- **Projection (follow-up).** Building the non-default shapes in Linear
+  (Initiative/Project/Issue/sub-issue create paths + the L0 super-level) is the
+  next increment; today the grammar + validation ship, the default projection is
+  unchanged. `extension.id` stays `linear`; the command surface is unchanged.
+
 ## [0.3.0] — 2026-06-08 — Config/identity split, team-scoped seeding, faithful projection
 
 Three spec-driven features (specs 004/005/006). `extension.id` stays `linear`;

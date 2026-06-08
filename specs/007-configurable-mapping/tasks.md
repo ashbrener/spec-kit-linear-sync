@@ -27,6 +27,33 @@ sub-issue / checklist) needing no availability probe, and the only optional
 artifact (the L0 Milestone) degrades gracefully. There is no separate "2-level
 checklist mode" task family — `task→checklist` is already the Linear default.
 
+## Implementation status (2026-06-08)
+
+**Shipped (this increment — config layer, green):** Foundational (T003–T010), US1
+(T013–T014), and the validation half of US2 (the offline relationship +
+Linear-native containment matrix, T006/T010) are implemented and unit-tested in
+`src/config.sh`, with the gate wired into `reconcile::load_config`. Polish T029
+(shellcheck), T031 (markdownlint), T034 (CONTRIBUTING), T035 (CHANGELOG) done.
+25 mapping unit tests green; full unit suite green.
+
+**Model correction applied during implementation:** the design docs were
+re-grounded on Linear's real hierarchy — `Initiative > Project > Issue >
+sub-issue`. The narrative super-level (L0) is an **Initiative** (not a Milestone —
+Linear Milestones live inside a Project), and the #17 spec-as-Project shape is
+`repo→Initiative, spec→Project, phase→Issue, task→sub-issue` (Linear Projects
+cannot nest under Projects). The validator rejects Linear-impossible nestings.
+
+**Deferred to a focused follow-up increment — the projection build:** US2
+artifact projection (T015–T020), US3 end-to-end partial-inheritance integration
+(T021–T022), US4 L0 Initiative super-level + GraphQL (T023–T028), the setup
+fixtures (T001/T002), and the reconcile-level integration tests (T011/T012,
+T019/T020). These require surgery in the 3,700-line `src/reconcile.sh` (new
+Initiative/Project/Issue/sub-issue create + query + idempotency paths) and are
+intentionally a separate, tightly-scoped, green increment per the constitution's
+safety guarantees. The shipped config layer is HONEST in the meantime: it never
+accepts a mapping the projection could not build. README (T033) is held until the
+projection lands so it does not advertise not-yet-built behaviour.
+
 ## Format: `[ID] [P?] [Story?] Description with file path`
 
 - **[P]**: parallelizable (different file, no dependency on an incomplete task)
@@ -154,13 +181,13 @@ graceful degradation.
 
 ## Phase N: Polish & Cross-Cutting
 
-- [ ] T029 [P] shellcheck `--shell=bash --severity=style` clean across all touched `src/*.sh` (`config.sh`, `reconcile.sh`, `graphql.sh`); fix findings (CI uses `--severity=style`)
+- [X] T029 [P] shellcheck `--shell=bash --severity=style` clean across all touched `src/*.sh` (`config.sh`, `reconcile.sh`, `graphql.sh`); fix findings (CI uses `--severity=style`)
 - [ ] T030 [P] yamllint clean on the updated config template + any fixture YAML
-- [ ] T031 [P] markdownlint-clean across `specs/007-configurable-mapping/**/*.md` (`npx markdownlint-cli2`)
+- [X] T031 [P] markdownlint-clean across `specs/007-configurable-mapping/**/*.md` (`npx markdownlint-cli2`)
 - [ ] T032 [P] Extend `tests/unit/no-real-identifiers.bats` coverage over the new fixtures (`milestone_meta/`, `mapping_configs/`, the template `mapping:` block); confirm placeholders only (FR-018)
 - [ ] T033 [P] Update `README.md` — reframe the mapping table (~L138) + cover line as the **default** mapping and document the opt-in `mapping:` block (the #17 spec→Project shape, partial inheritance, the L0 Milestone super-level); keep the auto-sync flow first (Principle VII) — constitution v2.1.0 propagation
-- [ ] T034 [P] Update `CONTRIBUTING.md` (L8) — "locked data-model mapping" → "default data-model mapping (configurable per spec 007)" — constitution v2.1.0 propagation
-- [ ] T035 [P] Update `CHANGELOG.md` (Unreleased: configurable artifact mapping — alias default, per-level mapping + relationship-validation matrix, #17 spec→Project shape, partial inheritance, optional L0 Milestone super-level; constitution v2.1.0)
+- [X] T034 [P] Update `CONTRIBUTING.md` (L8) — "locked data-model mapping" → "default data-model mapping (configurable per spec 007)" — constitution v2.1.0 propagation
+- [X] T035 [P] Update `CHANGELOG.md` (Unreleased: configurable artifact mapping — alias default, per-level mapping + relationship-validation matrix, #17 spec→Project shape, partial inheritance, optional L0 Milestone super-level; constitution v2.1.0)
 - [ ] T036 [P] Validate `specs/007-configurable-mapping/quickstart.md` against the shipped behaviour (default, #17 shape, partial, L0) and correct any drift
 - [ ] T037 Run the exact CI locally (shellcheck `--severity=style` + yamllint + markdownlint + bats unit + integration) and fix to green before pushing; ubuntu CI is authoritative over macOS for any GNU/BSD difference
 
