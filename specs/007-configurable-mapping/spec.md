@@ -12,7 +12,8 @@
 
 ### Session 2026-06-08
 
-- Q: When a configured Linear artifact cannot be created in the target workspace (e.g. the narrative super-level wants a Milestone but Project Milestones are unavailable on the plan/team), what happens? → A: For required levels (repo/spec/phase/task) the artifact set is fixed Linear primitives (Project, Issue, sub-issue, checklist) so absence is impossible; the only optional artifact is the L0 Milestone, which degrades gracefully (folds onto the repo level behind a stable marker + grouping label) rather than hard-failing — mirroring Jira's `on_absent: degrade`.
+- Q: When a configured Linear artifact cannot be created in the target workspace (e.g. the narrative super-level wants an Initiative but Initiatives are unavailable on the plan/workspace), what happens? → A: For required levels (repo/spec/phase/task) the artifact set is fixed Linear primitives (Project, Issue, sub-issue, checklist) so absence is impossible; the only optional artifact is the L0 Initiative, which degrades gracefully (folds onto the repo level behind a stable marker + grouping label) rather than hard-failing — mirroring Jira's `on_absent: degrade`. (Correction note: this Q/A originally referenced "Milestone" — corrected to Initiative; Linear Milestones sub-divide a Project's timeline and cannot act as an above-Project container; the correct above-Project container is the Initiative.)
+- Q: Can a Project nest under another Project in Linear? → A: No. Linear's native containment hierarchy is Initiative > Project > Issue > sub-issue; a Project may only nest under an Initiative, not another Project. Attempting to configure Project-under-Project is rejected at config-load (fail-closed). This finding informed the #17 spec-as-Project shape: repo must map to Initiative (not Project) when spec maps to Project, so the containment chain remains valid.
 - Q: Which relationships may be used as a hierarchy (parent→child) link in Linear? → A: Only `parent` (native sub-issue nesting), `none` (top level), and `checklist` (renders into the parent body); `blocks` and `relates` are rejected as hierarchy links — all rejections hard-halt at config-load (fail-closed, Principle VIII).
 - Q: How does an absent `mapping:` block stay byte-for-byte back-compatible? → A: An alias layer synthesizes today's default (repo→Project, spec→Issue, phase→sub-issue, task→checklist, L0 off) from the existing `linear-config.yml` binding keys, with no file rewrite and no version bump; a pre-feature config loads unchanged.
 - Q: How does this relate to the Jira sink? → A: It is a faithful port of `spec-kit-jira`'s `specs/002-configurable-mapping` — same four-level grammar, same optional/additive alias layer, same offline relationship matrix shape, same fail-closed validation gate — with Linear primitives substituted for Jira issue types (see the cross-reference parity table in Assumptions).
@@ -69,17 +70,19 @@ code change. The relationship validation is inseparable from it: without it, a
 configured `blocks`-as-nesting link would silently produce a mis-shaped Linear
 hierarchy.
 
-**Independent Test**: Configure the #17 alternative (spec→Project, phase→Issue,
-task→sub-issue) and confirm the mirror uses those artifacts with the configured
-parent relationships; then configure a nonsensical hierarchy relationship and
-confirm the run is rejected before any write.
+**Independent Test**: Configure the #17 alternative (repo→Initiative, spec→Project,
+phase→Issue, task→sub-issue) and confirm the mirror uses those artifacts with the
+configured parent relationships; then configure a nonsensical hierarchy relationship
+and confirm the run is rejected before any write.
 
 **Acceptance Scenarios**:
 
-1. **Given** a `mapping:` block of spec→Project, phase→Issue, task→sub-issue,
-   **When** the operator reconciles, **Then** the bridge creates a Project per
-   spec, an Issue per task phase, and a sub-issue per task, with the configured
-   parent relationships, and #17's spec-as-Project shape is realised.
+1. **Given** a `mapping:` block of repo→Initiative, spec→Project, phase→Issue,
+   task→sub-issue, **When** the operator reconciles, **Then** the bridge creates
+   an Initiative per repo, a Project per spec, an Issue per task phase, and a
+   sub-issue per task, with the configured parent relationships, and #17's
+   spec-as-Project shape is realised with a valid Initiative > Project > Issue >
+   sub-issue containment chain.
 2. **Given** a `mapping:` block with a relationship that is nonsensical as a
    hierarchy link (e.g. `blocks` used to nest a child under its parent), **When**
    the operator reconciles, **Then** validation rejects it at config-load with a
@@ -122,28 +125,30 @@ synthesized default would, with a zero-churn re-run.
 
 An operator turns on an optional narrative level above the repo — the human "what
 are we building" requirement (the §16 / L0 super-level) — which maps to a Linear
-**Milestone** (Linear's free, narrative-shaped primitive) where the team supports
-Project Milestones, and otherwise folds onto the repo level behind a stable marker
-with a grouping label rather than failing.
+**Initiative** (Linear's above-Project container and the correct above-repo
+narrative primitive) where the workspace supports Initiatives, and otherwise folds
+onto the repo level behind a stable marker with a grouping label rather than
+failing.
 
 **Why this priority**: A differentiating capability for teams that track a
 narrative above the per-repo Project, but it is off by default, narrative-only,
 and depends on workspace capability — so it is the lowest-priority slice, exactly
-as the Initiative super-level is in the Jira sink.
+as the Initiative super-level is in the Jira sink. This also improves cross-sink
+parity: both sinks now use Initiative for L0.
 
-**Independent Test**: With the super-level on, run against a team that supports
-Milestones and confirm a Milestone is created above the repo level with its
-narrative populated only from the explicit source; run against one that does not
-and confirm the narrative folds behind a stable marker with a grouping label and
-no hard failure.
+**Independent Test**: With the super-level on, run against a workspace that
+supports Initiatives and confirm an Initiative is created above the repo level
+with its narrative populated only from the explicit source; run against one that
+does not and confirm the narrative folds behind a stable marker with a grouping
+label and no hard failure.
 
 **Acceptance Scenarios**:
 
-1. **Given** the super-level on and Milestones available, **When** the operator
-   reconciles, **Then** a Milestone is created above the repo level and its
+1. **Given** the super-level on and Initiatives available, **When** the operator
+   reconciles, **Then** an Initiative is created above the repo level and its
    narrative is populated only from the explicit source (the spec's input
    description), never inferred.
-2. **Given** the super-level on and Milestones unavailable, **When** the operator
+2. **Given** the super-level on and Initiatives unavailable, **When** the operator
    reconciles, **Then** the narrative folds onto the repo level behind a stable
    marker, repo grouping becomes a label, and the run succeeds (no hard failure).
 3. **Given** the super-level off (the default), **When** the operator reconciles,
@@ -153,9 +158,9 @@ no hard failure.
 
 - A `mapping:` block specifies only some levels — unspecified levels fall back to
   the synthesized default (per-level inheritance), not an all-or-nothing error.
-- The target team supports Project Milestones at first but the operator later
-  loses that capability (or vice versa) — degradation/upgrade must re-home the
-  narrative without churn.
+- The workspace supports Initiatives at first but the operator later loses that
+  capability (or vice versa) — degradation/upgrade must re-home the narrative
+  without churn.
 - A configured relationship is valid in isolation but invalid for the level
   boundary it is placed on (e.g. `parent` declared on the top `repo` level, which
   has no parent) — rejected at validation.
@@ -183,8 +188,11 @@ no hard failure.
   (`Project`, `Issue`, `sub-issue`, or the `checklist` sentinel) and the
   relationship that links it to its parent level.
 - **FR-004**: The system MUST support, as an opt-in alternative to the default,
-  the #17 spec-as-Project shape (spec→Project, phase→Issue, task→sub-issue),
-  selectable entirely through the `mapping:` grammar with no code change.
+  the #17 spec-as-Project shape (repo→Initiative, spec→Project, phase→Issue,
+  task→sub-issue), selectable entirely through the `mapping:` grammar with no
+  code change. Because Linear Projects cannot nest under Projects, the repo level
+  MUST map to Initiative (not Project) when spec maps to Project, to maintain a
+  valid Linear-native containment chain (Initiative > Project > Issue > sub-issue).
 - **FR-005**: The system MUST treat a `mapping:` block that specifies only some
   levels as valid, with each unspecified level inheriting the synthesized default
   (per-level inheritance), not an all-or-nothing error.
@@ -192,8 +200,13 @@ no hard failure.
   of allowed (level-boundary × relationship-type) combinations and reject these
   semantically nonsensical combinations before any write: dependency-style links
   (`blocks`, `relates`) used as hierarchy links; a `parent` relationship on a
-  level that has no parent (the top level); and a `checklist` artifact paired with
-  any relationship other than `checklist`.
+  level that has no parent (the top level); a `checklist` artifact paired with
+  any relationship other than `checklist`; and any Linear-native containment
+  violation (Project nested under a non-Initiative parent, Issue nested under a
+  non-Project parent, sub-issue nested under a non-Issue parent, or
+  Project-under-Project). These containment violations are rejected at config-load
+  (fail-closed, Principle VIII) because Linear's containment hierarchy is fixed:
+  Initiative > Project > Issue > sub-issue.
 - **FR-007**: All relationship-matrix validation MUST be offline (require no
   Linear call) and run at config-load before any write; any failure is a
   workspace-level configuration error that writes nothing for the run (fail-closed,
@@ -211,10 +224,10 @@ no hard failure.
   work unit in every mode; an enabled narrative super-level MUST NOT become a new
   drift surface.
 - **FR-011**: The system MUST offer an optional, off-by-default narrative
-  super-level (L0) above the repo that projects to a Linear **Milestone** where
-  Project Milestones are available and degrades gracefully (fold the narrative onto
-  the repo level behind a stable marker and carry repo grouping as a label) where
-  they are not — never hard-failing because the team lacks Milestone support.
+  super-level (L0) above the repo that projects to a Linear **Initiative** where
+  Initiatives are available and degrades gracefully (fold the narrative onto the
+  repo level behind a stable marker and carry repo grouping as a label) where
+  they are not — never hard-failing because the workspace lacks Initiative support.
 - **FR-012**: The narrative for the super-level MUST be populated only from an
   explicit source (the spec's input description) — never inferred or fabricated.
 - **FR-013**: All configuration validation (relationship matrix, required-id
@@ -247,13 +260,20 @@ no hard failure.
 - **workstate level**: the four neutral, ordinal structural units the mapping
   consumes — repo → spec → phase → task — independent of any spec-kit on-disk
   concept; the shared grammar both sinks project from.
-- **Linear artifact vocabulary**: the artifacts a level may project to — `Project`,
-  `Issue`, `sub-issue`, and the non-issue `checklist` sentinel — plus the optional
-  L0 `Milestone` super-level artifact.
+- **Linear artifact vocabulary**: the artifacts a level may project to — `Initiative`,
+  `Project`, `Issue`, `sub-issue`, and the non-issue `checklist` sentinel. Linear's
+  native containment hierarchy is **Initiative > Project > Issue > sub-issue**;
+  `checklist` is an in-body sentinel at the task level. `Milestone` is NOT a valid
+  L0 artifact: Linear Milestones sub-divide a Project's timeline and cannot act as
+  an above-Project container.
 - **Relationship-validation matrix**: the offline allow/reject table of
   (level-boundary × relationship-type) combinations that guards against corrupt
   Linear graphs. Allowed hierarchy links: `parent`, `none`, `checklist`. Rejected:
-  `blocks`, `relates` (dependency links, not nesting).
+  `blocks`, `relates` (dependency links, not nesting). Also validates Linear-native
+  containment: a child artifact may only nest under a Linear-valid parent artifact
+  (Project under Initiative; Issue under Project; sub-issue under Issue).
+  Project-under-Project, Issue-under-Initiative, and similar invalid nestings are
+  rejected at config-load (fail-closed).
 - **Narrative source**: the explicit origin of the L0 super-level narrative (the
   spec's input description); never an inference.
 
@@ -265,20 +285,21 @@ no hard failure.
   existing default-mapping acceptance scenarios still pass, and a re-run is zero
   churn.
 - **SC-002**: An operator can switch a repo from spec→Issue to the #17
-  spec→Project shape (spec→Project, phase→Issue, task→sub-issue) entirely through
-  the `mapping:` block, with no code change.
+  spec→Project shape (repo→Initiative, spec→Project, phase→Issue, task→sub-issue)
+  entirely through the `mapping:` block, with no code change.
 - **SC-003**: 100% of `mapping:` blocks containing a nonsensical hierarchy
-  relationship (dependency link as nesting, `parent` on the top level, or
-  `checklist` artifact with a non-`checklist` relationship) are rejected at
-  config-load before any Project, Issue, or sub-issue is created or modified (no
-  partial mirrors).
+  relationship (dependency link as nesting, `parent` on the top level,
+  `checklist` artifact with a non-`checklist` relationship, or any Linear-native
+  containment violation such as Project-under-Project or Issue-under-Initiative)
+  are rejected at config-load before any Initiative, Project, Issue, or sub-issue
+  is created or modified (no partial mirrors).
 - **SC-004**: Every non-default mode (the #17 spec→Project shape, a partial
   mapping, and the narrative super-level) re-runs against unchanged state with
   zero observable writes.
 - **SC-005**: A `mapping:` block that specifies only some levels mirrors
   identically to one that spells out the full block with the same overrides
   (per-level inheritance equivalence).
-- **SC-006**: A team lacking Project Milestone support never causes a hard failure
+- **SC-006**: A workspace lacking Initiative support never causes a hard failure
   when the narrative super-level is on — the narrative always lands (folded onto
   the repo level) and the run succeeds.
 - **SC-007**: The Linear `mapping:` grammar is structurally equivalent to the
@@ -303,11 +324,19 @@ primitives.
 
   | workstate level | Jira default | Linear default | Linear #17 alternative |
   |-----------------|--------------|----------------|------------------------|
-  | L0 (narrative)  | Initiative (off) | Milestone (off) | Milestone (off) |
-  | repo            | Epic         | Project        | Project        |
+  | L0 (narrative)  | Initiative (off) | Initiative (off) | Initiative (off) |
+  | repo            | Epic         | Project        | **Initiative** |
   | spec            | Story        | Issue          | **Project**    |
   | phase           | Subtask      | sub-issue      | **Issue**      |
   | task            | checklist    | checklist      | **sub-issue**  |
+
+  The L0 row previously listed "Milestone (off)" for Linear — corrected to
+  Initiative (off): Linear Milestones sub-divide a Project's timeline and cannot
+  act as an above-Project container; Initiative is Linear's correct above-Project
+  container, matching the Jira sink's L0. This improves cross-sink parity: both
+  sinks now use Initiative for L0. In the #17 alternative the repo level also
+  becomes Initiative (not Project) because Linear Projects cannot nest under
+  Projects; the containment chain must be Initiative > Project > Issue > sub-issue.
 
   The relationship vocabulary maps Jira's `parent`/`Epic-link`/`none`/`checklist`
   hierarchy links to Linear's `parent`/`none`/`checklist` (Linear has a single
@@ -322,11 +351,14 @@ primitives.
   inter-task-phase ordering as today (FR-001), separate from the hierarchy.
 
 - **Narrative super-level (§16 / L0)**: Off by default, narrative-only, `source:
-  spec_input`. It projects to a Linear Milestone where the team supports Project
-  Milestones and otherwise folds onto the repo level behind a stable marker with a
-  grouping label (`on_absent: degrade`), idempotently. Milestone is Linear's
-  free-form narrative-shaped primitive and was reserved-but-unused in the 001
-  baseline, so adopting it here introduces no conflict with the default mapping.
+  spec_input`. It projects to a Linear **Initiative** where the workspace supports
+  Initiatives and otherwise folds onto the repo level behind a stable marker with a
+  grouping label (`on_absent: degrade`), idempotently. Initiative is Linear's
+  above-Project container and the correct above-repo narrative primitive. Using
+  Initiative here improves cross-sink parity: both the Jira sink and the Linear sink
+  now use Initiative for L0. The previously-assumed Milestone target is incorrect
+  because Milestones sub-divide a Project's timeline and cannot act as an
+  above-Project container.
 
 - **Partial mapping**: An incomplete `mapping:` block inherits the synthesized
   default per unspecified level (not all-or-nothing).
@@ -338,7 +370,7 @@ primitives.
 
 - **Out of scope**: bidirectional sync; any change to the default mapping or to the
   001 acceptance behaviour; a runtime/live probe of Linear artifact availability
-  beyond the Milestone capability degrade path (the required-level artifacts are
+  beyond the Initiative capability degrade path (the required-level artifacts are
   fixed Linear primitives and need no availability probe); a workstate-direct input
   seam and a status-rollup lever (both present in the Jira spec) are deferred to a
   later Linear feature and are not part of this port.

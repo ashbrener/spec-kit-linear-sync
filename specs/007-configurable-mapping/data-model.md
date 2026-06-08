@@ -72,7 +72,7 @@ linear:
   mapping:
     l0:
       enabled: false                    # OFF by default (FR-011)
-      artifact: "Milestone"             # Linear Milestone (narrative-shaped primitive)
+      artifact: "Initiative"            # Linear Initiative (above-Project container)
       on_absent: "degrade"              # ONLY supported policy — fold onto repo level
       source: "spec_input"              # spec.md "Input:" line; NEVER inferred (FR-012)
     levels:
@@ -96,7 +96,7 @@ linear:
 |-------|------|---------|-------|
 | `mapping` | block | (synthesized) | absent ⇒ alias layer emits the default |
 | `mapping.l0.enabled` | bool | `false` | narrative super-level on/off (FR-011) |
-| `mapping.l0.artifact` | string | `"Milestone"` | Linear Milestone; only valid L0 artifact |
+| `mapping.l0.artifact` | string | `"Initiative"` | Linear Initiative; only valid L0 artifact |
 | `mapping.l0.on_absent` | enum | `"degrade"` | `degrade` is the only supported policy |
 | `mapping.l0.source` | enum | `"spec_input"` | explicit origin only; never inferred (FR-012) |
 | `mapping.levels.<level>.artifact` | string | per default | Linear artifact or `checklist` sentinel |
@@ -125,7 +125,9 @@ follows: `Epic-link` → `parent` (the only nesting link); `Blocks`/`Relates`/
   standalone artifact. **No availability probe is required for the four
   required levels** — `Project`, `Issue`, `sub-issue`, and `checklist` are
   fixed Linear primitives available in every Linear workspace. Only the L0
-  `Milestone` has a degrade path (`on_absent: degrade`), not a hard error.
+  `Initiative` has a degrade path (`on_absent: degrade`), not a hard error.
+- `mapping.l0.artifact` MUST be `"Initiative"` (the only valid L0 artifact);
+  any other value is a config error.
 - Each `relationship_to_parent` is checked against the relationship-validation
   matrix (§4). Any rejected value is a config error (hard-halt, no write).
 - An artifact that resolves to a standalone Issue or sub-issue REQUIRES the
@@ -133,9 +135,9 @@ follows: `Epic-link` → `parent` (the only nesting link); `Blocks`/`Relates`/
   `linear-config.yml`; a missing required prefix is a config error (FR-009,
   FR-013). (The alias layer synthesizes all five default prefixes so this is
   only relevant for manually-trimmed configs.)
-- `l0.enabled: true` does NOT require a Milestone UUID — Milestone
-  availability is runtime-detected; absence is handled by `on_absent: degrade`,
-  not a config error (FR-011).
+- `l0.enabled: true` does NOT require an Initiative to already exist —
+  Initiative availability is runtime-detected; absence is handled by
+  `on_absent: degrade`, not a config error (FR-011).
 - `mapping.l0.enabled: true` REQUIRES `mapping.l0.source: "spec_input"` (the
   only supported source); any other value is a config error.
 
@@ -144,7 +146,7 @@ follows: `Epic-link` → `parent` (the only nesting link); `Blocks`/`Relates`/
 - The synthesized default and an explicit full default block MUST be equivalent
   (alias-layer round-trip; FR-002, US1 scenario 3).
 - L0 degrade→upgrade re-home MUST be idempotent: folding the narrative onto the
-  repo Project (degraded) and later re-homing it onto a real Milestone produces
+  repo Project (degraded) and later re-homing it onto a real Initiative produces
   zero churn on unchanged content, keyed by the stable marker (§6) and the
   reused `repo_prefix` grouping label (FR-008, FR-011).
 - **DEFERRED (out of scope)**: `status_rollup` — present in the Jira data
@@ -161,7 +163,7 @@ super-level sits above `repo` when enabled.
 
 | Level | workstate origin | Ordinal | Default artifact | Default link to parent |
 |-------|-----------------|---------|-----------------|------------------------|
-| `l0` (narrative, optional) | narrative source | 0 | Milestone | `none` (above repo) |
+| `l0` (narrative, optional) | narrative source | 0 | Initiative | `none` (above repo) |
 | `repo` | source repo | 1 | Project | `none` (or `parent` when l0 on) |
 | `spec` | spec directory | 2 | Issue | `parent` (under repo Project) |
 | `phase` | task-phase | 3 | sub-issue | `parent` (under spec Issue) |
@@ -183,11 +185,11 @@ The set of artifacts a level may project to. These are fixed Linear primitives
 
 | Artifact | Linear primitive | Notes |
 |----------|-----------------|-------|
+| `Initiative` | Linear Initiative | above-Project container; L0 / #17-parent level only; optional; degrades when the plan lacks Initiatives (`on_absent: degrade`) |
 | `Project` | Linear Project | top-level container; carries its own issue list |
 | `Issue` | Linear Issue | first-class issue under a Project |
 | `sub-issue` | Linear Issue with `parent` set | native nesting via the `parent` field |
 | `checklist` | in-body checklist sentinel | NOT a standalone artifact; rendered into the parent body as a markdown task list; keyed by workstate task identity for idempotent re-render (FR-008) |
-| `Milestone` | Linear Milestone | L0 only; optional; degrades when unavailable |
 
 **Checklist sentinel note**: `checklist` is not a Linear API type — it is a
 bridge sentinel that instructs reconcile to render the level's items into the
@@ -218,33 +220,59 @@ HARD-HALT at config-load, before any write — no warn-and-continue.
 | `blocks` | REJECT | dependency semantics, not nesting |
 | `relates` | REJECT | dependency semantics, not nesting |
 
-### 4.2 Boundary-specific rejections (keyed by level × relationship)
+### 4.2 Position-driven rejections (top-level vs non-top-level)
 
-| Level boundary | Relationship | Decision | Reason |
-|---------------|-------------|----------|--------|
-| `l0` (L0 → ∅) | `parent` | REJECT | L0 has no parent; `none` is the only valid link |
-| `l0` | `checklist` | REJECT | Milestone is not an in-body artifact |
-| `repo` (when l0 off) | `parent` | REJECT | repo is the top level; no parent when l0 is off |
-| `repo` (when l0 on) | `parent` | ALLOW | repo Project nests under L0 Milestone |
-| `repo` | `checklist` | REJECT | Project is not an in-body artifact |
-| `spec` | `none` | REJECT | spec always has a repo parent |
-| `spec` | `checklist` | REJECT | checklist sentinel is only valid at the task level (see §3) |
-| `phase` | `none` | REJECT | phase always has a spec parent |
-| `phase` | `checklist` | REJECT | checklist sentinel is only valid at the task level |
-| `task` | `parent` | REJECT | task items render into the parent body (checklist only) |
-| `task` | `none` | REJECT | task items always have a phase parent |
+Validation is **artifact-driven + position-driven**, not level-name-hardcoded,
+so that the configurable mapping is not constrained to the default level names.
+
+| Position | Relationship | Decision | Reason |
+|----------|-------------|----------|--------|
+| top level (no parent in the resolved chain) | `parent` | REJECT | top level has no parent artifact to link to |
+| top level | `checklist` | REJECT | checklist is an in-body render; requires a parent body |
+| non-top level | `none` | REJECT | non-top levels always have a parent in the chain |
+| any level configured as `checklist` artifact | `parent` | REJECT | checklist artifact must pair with `checklist` relationship |
+| any level configured as `checklist` artifact | `none` | REJECT | checklist artifact must pair with `checklist` relationship |
+| non-`checklist` artifact | `checklist` | REJECT | `checklist` relationship is only valid with the `checklist` artifact |
 | any level | `blocks` | REJECT | dependency link, not nesting (FR-006) |
 | any level | `relates` | REJECT | dependency link, not nesting (FR-006) |
-| `checklist` artifact + any rel ≠ `checklist` | — | REJECT | checklist artifact must pair with checklist relationship |
 
-### 4.3 Notes on offline resolution
+**`checklist` co-constraint**: `artifact: "checklist"` MUST pair with
+`relationship_to_parent: "checklist"` and vice versa; any mismatch is a
+config error (FR-006 §3).
 
-All rejections are computed at config-load from the `mapping:` block alone —
-no Linear API call is required (FR-007). The relationship matrix is fully
-self-contained: Linear's single nesting primitive (`parent`) removes the
-classic-vs-team-managed style ambiguity that existed in the Jira model (where
-`Epic-link` vs `parent` depended on project style). As a result the matrix
-resolves fully offline in every mode with zero network round-trips.
+**L0 position note**: L0 is always the top level when enabled; it MUST use
+`relationship_to_parent: "none"`. Initiative is not an in-body artifact —
+`checklist` is rejected for L0 regardless of position.
+
+### 4.3 Containment sub-section (artifact nesting validity)
+
+A child artifact may only nest under a Linear-valid parent artifact. The
+following table is checked at config-load for every adjacent level pair in
+the resolved mapping (fail-closed; FR-007):
+
+| Child artifact | Valid parent artifact(s) | Invalid parent artifacts (REJECT) |
+|---------------|--------------------------|-----------------------------------|
+| `Initiative` | _(top-only; no parent)_ | any (Initiative is always top-level) |
+| `Project` | `Initiative`, _(none — top when l0 off)_ | `Project`, `Issue`, `sub-issue`, `checklist` |
+| `Issue` | `Project` | `Initiative`, `Issue`, `sub-issue`, `checklist` |
+| `sub-issue` | `Issue` | `Initiative`, `Project`, `sub-issue`, `checklist` |
+| `checklist` | `Issue`, `sub-issue` | `Initiative`, `Project`, `checklist` |
+
+Examples of rejected configurations (hard-halt at config-load):
+- `Project` under `Project` — REJECTED (`Project` is not a valid parent for `Project`)
+- `Issue` under `Initiative` — REJECTED (`Initiative` is not a valid parent for `Issue`)
+- `sub-issue` under `Project` — REJECTED (`Project` is not a valid parent for `sub-issue`)
+- `checklist` under `Project` — REJECTED (`Project` is not a valid parent for `checklist`)
+
+### 4.4 Notes on offline resolution
+
+All rejections — both position-driven (§4.2) and containment (§4.3) — are
+computed at config-load from the `mapping:` block alone — no Linear API call
+is required (FR-007). The relationship matrix is fully self-contained:
+Linear's single nesting primitive (`parent`) removes the classic-vs-team-managed
+style ambiguity that existed in the Jira model (where `Epic-link` vs `parent`
+depended on project style). As a result the matrix resolves fully offline in
+every mode with zero network round-trips.
 
 **Blocking/relating links between task phases** (inter-phase ordering, as used
 by today's 001 bridge) are separate from the hierarchy-link validation and
@@ -327,7 +355,7 @@ fabricated (FR-012).
   never inferred, fabricated, or taken from any other field.
 - If the L0 super-level is on but no `**Input**:` line is present in the spec
   (e.g. a newly created spec stub), the narrative field is left empty — it is
-  not a config error, and the Milestone (or degraded grouping label) is still
+  not a config error, and the Initiative (or degraded grouping label) is still
   created with an empty narrative body.
 - Per-org 1:many grouping is out of scope for this feature; the source ships
   per-repo 1:1.
@@ -418,6 +446,11 @@ Behaviour is byte-identical to the pre-feature bridge.
 
 ### Example B — #17 spec-as-Project shape
 
+The full #17 reshape MUST specify all four levels. A partial #17 (e.g. only
+`spec` overridden to `Project`) would leave `repo→Project/none` paired with
+`spec→Project/parent` — Project-under-Project — which the containment matrix
+(§4.3) rejects at config-load. All four levels must be specified together.
+
 ```yaml
 schema_version: 1
 
@@ -442,6 +475,9 @@ linear:
     task_prefix:      "speckit-task:"
   mapping:
     levels:
+      repo:
+        artifact: "Initiative"
+        relationship_to_parent: "none"
       spec:
         artifact: "Project"
         relationship_to_parent: "parent"
@@ -453,27 +489,38 @@ linear:
         relationship_to_parent: "parent"
 ```
 
-`repo` is unspecified — inherits synthesized default (Project/none).
-`l0` is unspecified — inherits synthesized default (enabled: false).
-Result: repo→Project/none, spec→Project/parent, phase→Issue/parent,
+All four levels are specified — a partial #17 is rejected by the containment
+matrix (§4.3). `l0` is unspecified — inherits synthesized default (enabled: false).
+Result: repo→Initiative/none, spec→Project/parent, phase→Issue/parent,
 task→sub-issue/parent, L0 off.
 
 ---
 
 ### Example C — partial block (one-level override)
 
+A single-level partial block is valid when the override does not create an
+invalid nesting with the inherited defaults. For example, overriding only
+`phase` to produce a flatter Issue hierarchy is valid because Issue-under-Issue
+is allowed:
+
 ```yaml
   mapping:
     levels:
-      spec:
-        artifact: "Project"
+      phase:
+        artifact: "Issue"
         relationship_to_parent: "parent"
 ```
 
-`repo`, `phase`, and `task` inherit the synthesized default.
+`repo`, `spec`, and `task` inherit the synthesized default.
 `l0` inherits the synthesized default (off).
-Result: repo→Project/none, spec→Project/parent, phase→sub-issue/parent,
+Result: repo→Project/none, spec→Issue/parent, phase→Issue/parent,
 task→checklist/checklist, L0 off.
+
+**NOTE**: A one-level partial block that overrides only `spec` to `Project`
+(leaving `repo` at the synthesized default of `Project/none`) would produce
+Project-under-Project, which the containment matrix (§4.3) rejects at
+config-load. The #17 reshape requires all four levels to be specified together
+(see Example B).
 
 ---
 
@@ -483,7 +530,7 @@ task→checklist/checklist, L0 off.
   mapping:
     l0:
       enabled: true
-      artifact: "Milestone"
+      artifact: "Initiative"
       on_absent: "degrade"
       source: "spec_input"
     levels:
@@ -501,9 +548,9 @@ task→checklist/checklist, L0 off.
         relationship_to_parent: "checklist"
 ```
 
-When the team supports Project Milestones: a Milestone is created above the
+When the team has an Initiative available: an Initiative is created above the
 repo level; narrative is populated from `spec.md` `**Input**:` line only.
-When Milestones are unavailable: narrative folds onto the repo Project behind
+When no Initiative is available: narrative folds onto the repo Project behind
 a stable marker; repo grouping carried as a label; run succeeds (no hard
 failure). (FR-011, FR-012.)
 
@@ -517,8 +564,8 @@ structurally equivalent between the two sinks (FR-015, SC-007).
 
 | workstate level | Jira artifact (default) | Linear artifact (default) | Linear #17 alternative |
 |-----------------|------------------------|--------------------------|------------------------|
-| L0 (narrative, off by default) | Initiative | Milestone | Milestone |
-| `repo` | Epic | Project | Project |
+| L0 (narrative, off by default) | Initiative | Initiative | Initiative |
+| `repo` | Epic | Project | **Initiative** |
 | `spec` | Story | Issue | **Project** |
 | `phase` | Subtask | sub-issue | **Issue** |
 | `task` | checklist (ADF taskList) | checklist (markdown task list) | **sub-issue** |
@@ -542,6 +589,6 @@ structurally equivalent between the two sinks (FR-015, SC-007).
 | `--workstate` direct-input seam | In scope (§2.3) | **DEFERRED** — out of scope |
 | `status_rollup` lever | In scope | **DEFERRED** — out of scope |
 | Available-type detection probe | In scope (§3 of Jira model) | **NOT NEEDED** — required-level artifacts are fixed Linear primitives; no probe |
-| L0 super-level | Initiative (Premium-only) | Milestone (free, narrative primitive) |
+| L0 super-level | Initiative (Jira Premium-only) | Initiative (Linear; above-Project container) — improved parity |
 | `on_absent` policy | `degrade` (L0 only) | `degrade` (L0 only) — same |
 | Relationship matrix | `parent`, `Epic-link`, `none`, `checklist`; reject `Blocks`/`Relates`/`Implements` | `parent`, `none`, `checklist`; reject `blocks`/`relates` |

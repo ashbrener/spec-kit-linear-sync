@@ -118,71 +118,89 @@ boundaries below. Nothing remains blocking for Phase 1 design.
 
 ## D4 — Design issue #17: spec-as-Project alternative
 
-- **Decision**: The #17 spec-as-Project mapping (spec→Project, phase→Issue,
-  task→sub-issue) is supported as a first-class alternative selectable
-  entirely through the `mapping:` grammar, with no code change. It is not
-  the default. The same grammar that configures any other level combination
-  can express the #17 shape; no special-casing is required.
+- **Decision**: The #17 spec-as-Project mapping uses the full four-level
+  nesting **repo→Initiative, spec→Project, phase→Issue, task→sub-issue** and is
+  supported as a first-class alternative selectable entirely through the
+  `mapping:` grammar, with no code change. It is not the default. The same
+  grammar that configures any other level combination can express the #17 shape;
+  no special-casing is required.
 - **Rationale**: Making the mapping configurable resolves #17 as a choice rather
   than a one-off decision — the core framing of the feature (spec FR-004). Under
-  the #17 shape, a spec becomes a Project (heavier, with its own milestone list
-  and issue list), and its task phases become top-level Issues inside that
-  Project. The grammar can express this without any structural divergence from
-  the four-level workstate model. Identity keying (D7) handles the new
-  Project-projected spec level correctly.
+  the #17 shape, a spec becomes a Project (heavier, with its own issue list), and
+  its task phases become top-level Issues inside that Project. Critically, Linear
+  Projects cannot be nested under other Projects — the repo level must therefore
+  be promoted to an **Initiative** (the real above-Project container in Linear's
+  hierarchy: Initiative > Project > Issue > sub-issue). Expressing the #17 shape
+  as repo→Project + spec→Project would be rejected by the relationship-validation
+  matrix at config-load (D2, D11). The grammar can express the corrected four-level
+  shape without any structural divergence from the workstate model. Identity
+  keying (D7) handles the new Project-projected spec level and Initiative-projected
+  repo level correctly.
 - **Alternatives considered**: Hard-code the #17 shape as a separate mode flag
   (rejected — would bifurcate the config surface and prevent the grammar from
   generalising further); make the #17 shape the new default (rejected —
   constitutionally forbidden without a MAJOR version bump; changing the default
-  is reserved for MAJOR per v2.1.0 Architectural Constraints).
+  is reserved for MAJOR per v2.1.0 Architectural Constraints); express #17 as
+  repo→Project + spec→Project (rejected — Project-under-Project is a
+  Linear-impossible nesting, hard-rejected by the validation matrix with a hint
+  to use an Initiative).
 
 ---
 
-## D5 — Optional L0 narrative super-level → Linear Milestone
+## D5 — Optional L0 narrative super-level → Linear Initiative
 
 - **Decision**: The narrative super-level (L0, above the repo level) is
   **off by default**. When enabled (`super_level.enabled: true`), it projects to
-  a Linear **Milestone** where the target team supports Project Milestones, and
-  degrades gracefully when Milestones are unavailable. Degradation: the
+  a Linear **Initiative** where the workspace plan supports Initiatives, and
+  degrades gracefully when Initiatives are unavailable. Degradation: the
   narrative folds onto the repo level behind a stable marker line, and repo
   grouping is carried as a label (`on_absent: degrade`). This degradation is
-  idempotent — a team that later gains Milestone support can re-home the
+  idempotent — a workspace that later gains Initiative support can re-home the
   narrative without churn; a re-run in the degraded state produces zero writes.
   Narrative is populated only from an explicit source (`source: spec_input`,
   the spec's input description) and never inferred or fabricated (FR-012).
 - **Rationale**: The L0 super-level is the narrative "what are we building"
   requirement above the per-repo Project, off by default so a no-config upgrade
-  is unaffected. Linear's Milestone is the correct primitive: it is free-form,
-  narrative-shaped, and was reserved-but-unused in the 001 baseline — adopting
-  it here introduces no conflict with the default mapping. Graceful degradation
-  matches the Jira `on_absent: degrade` policy for Initiatives (Jira research
-  Q5) and mirrors the spec clarification (Clarification 2026-06-08): "never
-  hard-fail because the team lacks Milestone support." The stable marker (not a
-  free prepend) makes the fold idempotent and safely re-homeable. Milestone
-  GraphQL helpers go in `src/graphql.sh` (the existing direct-GraphQL edge path,
-  consistent with Principle VI seed-step fallback).
+  is unaffected. Linear's **Initiative** is the correct primitive for L0: it is
+  the above-Project narrative container in Linear's hierarchy
+  (Initiative > Project > Issue > sub-issue). A **Milestone** is not correct
+  here — Milestones live *inside* a Project (they sub-divide a Project's
+  timeline) and cannot be an above-Project container. Using a Milestone as L0
+  would misrepresent the hierarchy and conflict with the D4 #17 shape (which
+  also uses Initiative for the repo level). The Initiative-as-L0 choice also
+  improves Jira-parity: Jira uses an Initiative for L0 (Jira research Q5), so
+  both sinks now use an Initiative for L0. Graceful degradation matches the Jira
+  `on_absent: degrade` policy for Initiatives and mirrors the spec clarification
+  (Clarification 2026-06-08): "never hard-fail because the workspace lacks
+  Initiative support." The stable marker (not a free prepend) makes the fold
+  idempotent and safely re-homeable. Initiative GraphQL helpers go in
+  `src/graphql.sh` (the existing direct-GraphQL edge path, consistent with
+  Principle VI seed-step fallback).
 
   **Linear-vs-Jira note**: Jira detects Initiative availability via an
   issue-type-metadata probe (Jira research Q5). For Linear, availability
-  detection is simpler: the only optional artifact is the L0 Milestone (the
+  detection is simpler: the only optional artifact is the L0 Initiative (the
   required-level artifacts — Project, Issue, sub-issue, checklist — are fixed
-  Linear primitives that cannot be absent). A lightweight Milestone-capability
-  check at config-load (probing whether the target team's plan supports Project
-  Milestones) gates the create path without touching the required-level
-  validation matrix.
+  Linear primitives that cannot be absent). A lightweight Initiative-capability
+  check at config-load (probing whether the workspace plan supports Initiatives)
+  gates the create path without touching the required-level validation matrix.
+  Both sinks now use Initiative for L0 — this improves grammar parity.
 
-- **Alternatives considered**: Hard-fail when Milestones are unavailable
-  (rejected — the clarification is explicit: the team-capability gap must not
-  prevent the run; Principle VIII surfaces, does not block); operator config
-  flag for availability instead of a probe (rejected as the primary mechanism —
-  drifts from workspace reality; a probe is always authoritative); allow the L0
+- **Alternatives considered**: Map L0 to a Linear Milestone (rejected —
+  Milestones sub-divide a Project's timeline and cannot be an above-Project
+  container; using a Milestone as L0 misrepresents the hierarchy and is
+  structurally incorrect); hard-fail when Initiatives are unavailable (rejected —
+  the clarification is explicit: the workspace-capability gap must not prevent
+  the run; Principle VIII surfaces, does not block); operator config flag for
+  availability instead of a probe (rejected as the primary mechanism — drifts
+  from workspace reality; a probe is always authoritative); allow the L0
   narrative to be inferred from surrounding content (rejected — FR-012
   explicitly requires an explicit source only; inference violates the read-only
   mirror contract of Principle I).
 
 ---
 
-## D6 — Milestone capability check vs required-level availability probe (deferred)
+## D6 — Initiative capability check vs required-level availability probe (deferred)
 
 - **Decision**: A runtime availability probe for the **required-level** Linear
   artifacts (Project, Issue, sub-issue, checklist) is **out of scope** for this
@@ -192,7 +210,7 @@ boundaries below. Nothing remains blocking for Phase 1 design.
   may lack Story; Jira research Q10). Linear has no equivalent — the required
   artifacts (Project, Issue, sub-issue, checklist) are fixed primitives present
   in every Linear workspace; there is nothing to probe. The only optional
-  artifact is the L0 Milestone (D5), which has its own lightweight capability
+  artifact is the L0 Initiative (D5), which has its own lightweight capability
   check. Adding a probe for required-level artifacts would be dead code and
   would needlessly couple config-load to a network call.
 - **Alternatives considered**: Port the full Jira available-issue-type
@@ -271,6 +289,35 @@ boundaries below. Nothing remains blocking for Phase 1 design.
 
 ---
 
+## D11 — Model correction: L0→Initiative, #17 nesting, Linear-impossible nesting rejection
+
+- **Decision** (correction, recorded 2026-06-08): Three interrelated corrections
+  to the initially drafted model:
+  1. **L0 narrative → Initiative, not Milestone.** Linear Milestones live
+     *inside* a Project (they sub-divide its timeline) and cannot be an
+     above-Project container. The above-Project narrative container in Linear is
+     the Initiative. D5 is updated accordingly. This also improves Jira-parity:
+     both sinks now use Initiative for L0.
+  2. **#17 shape is repo→Initiative, spec→Project, phase→Issue,
+     task→sub-issue.** The earlier draft described the #17 shape as
+     repo→Project + spec→Project. That is structurally impossible: Linear
+     Projects cannot be nested under other Projects. Promoting the repo level to
+     an Initiative (the correct above-Project container) yields the valid four-level
+     hierarchy Initiative > Project > Issue > sub-issue. D4 is updated accordingly.
+  3. **Validation matrix explicitly rejects Linear-impossible nestings.**
+     Project-under-Project and Issue-under-Initiative are added to the rejection
+     table in D2's matrix. Config-load hard-halts with a hint to use an Initiative
+     when such a nesting is detected, before any write occurs.
+- **Rationale**: The corrections align the model with Linear's actual container
+  hierarchy. The frozen zero-config default (repo→Project, spec→Issue,
+  phase→sub-issue, task→checklist, L0 off) is unaffected by all three
+  corrections.
+- **Impact on other decisions**: D2 gains an additional rejection class (D3, D6,
+  D7, D8, D9, D10 are unaffected). D4 and D5 are updated in-place above. The
+  quickstart.md #17 YAML block and L0 example are updated to match.
+
+---
+
 ## D9 — `--workstate` direct-input seam (deferred — out of scope)
 
 - **Decision**: The `--workstate` direct-input flag (a flag on the reconcile
@@ -321,11 +368,17 @@ a reader of one config understands the other (FR-015, SC-007).
 
 | workstate level | Jira default | Linear default | Linear #17 alternative |
 |---|---|---|---|
-| L0 (narrative, off) | Initiative | Milestone | Milestone |
-| repo | Epic | Project | Project |
+| L0 (narrative, off) | Initiative | **Initiative** | **Initiative** |
+| repo | Epic | Project | **Initiative** |
 | spec | Story | Issue | **Project** |
 | phase | Subtask | sub-issue | **Issue** |
 | task | checklist | checklist | **sub-issue** |
+
+Note: Linear Milestones live inside a Project and are not an above-Project
+container — the Initiative is used for L0 in both sinks (improves Jira-parity).
+Under the #17 alternative the repo level is promoted to Initiative because
+Linear Projects cannot nest under other Projects (hierarchy: Initiative >
+Project > Issue > sub-issue).
 
 ### Relationship vocabulary parity
 
@@ -344,8 +397,8 @@ a reader of one config understands the other (FR-015, SC-007).
 | Q2 | Relationship-validation matrix | D2 | Narrower allowed set (`Epic-link` collapses to `parent`; `Implements` absent) |
 | Q3 | Project-style detection / probe | D6 (deferred) | Linear required-level artifacts are fixed primitives — no probe needed |
 | Q4 | Per-level inheritance | D3 | Identical decision |
-| Q5 | Initiative degradation mechanics | D5 | Linear Milestone replaces Jira Initiative; detection is a lightweight plan probe |
-| Q6 | Initiative scope (per-repo 1:1) | D5 | Milestone is per-repo 1:1; same rationale |
+| Q5 | Initiative degradation mechanics | D5 | Linear Initiative (not Milestone) for L0 — both sinks now use Initiative for L0; detection is a lightweight plan probe |
+| Q6 | Initiative scope (per-repo 1:1) | D5 | Initiative is per-repo 1:1; same rationale |
 | Q7 | Checklist keying + zero-churn | D8 | Same keying strategy; Markdown not ADF |
 | Q8 | `--workstate` direct-input seam | D9 (deferred) | Out of scope for this Linear port |
 | Q9 | Task-identity label prefix + provenance | D7 | `speckit-task:` label prefix; single stable marker |
@@ -363,7 +416,7 @@ a reader of one config understands the other (FR-015, SC-007).
 - **Source layout**: all mapping/alias/validation logic lives in
   `src/config.sh` (the source-agnostic config layer); `src/reconcile.sh`
   consumes a resolved mapping and gains no Linear-specific mapping knowledge
-  (FR-014); Milestone GraphQL helpers (query/create/attach) go in
+  (FR-014); Initiative GraphQL helpers (query/create/attach) go in
   `src/graphql.sh` using the existing edge GraphQL path (Principle VI).
 - **Testing**: `bats` (unit + integration); `shellcheck --shell=bash
   --severity=style`; `yamllint`; `markdownlint-cli2`.
