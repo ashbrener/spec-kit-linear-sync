@@ -5,7 +5,7 @@ This project is itself a spec-kit feature: every change to the bridge flows thro
 ## Before you start
 
 - Read [the constitution](./.specify/memory/constitution.md). All 8 principles are non-negotiable and the `/speckit-plan` Constitution Check gate enforces them.
-- Read [the spec for the current feature](./specs/001-spec-kit-linear-bridge/spec.md) for the locked data-model mapping, the FR numbering scheme, and the design vocabulary (`spec Issue`, `task phase`, `Layer D / Layer E`, `read-only mirror`, etc.). Use these terms verbatim — Principle VIII forbids inventing new ones.
+- Read [the spec for the current feature](./specs/001-spec-kit-linear-bridge/spec.md) for the default data-model mapping (configurable per [spec 007](./specs/007-configurable-mapping/spec.md); the spec-001 mapping is the frozen zero-config default), the FR numbering scheme, and the design vocabulary (`spec Issue`, `task phase`, `Layer D / Layer E`, `read-only mirror`, etc.). Use these terms verbatim — Principle VIII forbids inventing new ones.
 - Skim [`BRIEF.md`](./BRIEF.md) for the original kickoff context and the decisions that were already made before spec 001 was written.
 - Install the toolchain:
   - **spec-kit** (`uv tool install specify-cli`, or per the spec-kit docs) — pinned to ≥ v0.8.13.

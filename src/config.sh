@@ -796,3 +796,342 @@ config::validate() {
 
     return 0
 }
+
+# ===========================================================================
+# Configurable artifact mapping (spec 007).
+#
+# An OPTIONAL, additive `mapping:` block in linear-config.yml lets an operator
+# choose, per spec-kit level (repo, spec, phase, task), which Linear artifact
+# the level projects to and how it links to its parent — plus an off-by-default
+# narrative super-level (L0) above the repo. When the block is absent the
+# accessors below synthesize the frozen zero-config default (repo→Project,
+# spec→Issue, phase→sub-issue, task→checklist, L0 off), reproducing the 001
+# behaviour byte-for-byte with no file rewrite and no version bump (FR-001,
+# FR-002). The shallow YAML parser already populates CONFIG_VALUES[mapping.*]
+# at load time, so this section is pure resolution + validation — ALL mapping
+# logic lives in this source-agnostic config layer (FR-014); reconcile consumes
+# the resolved values via the accessors and gains no mapping knowledge.
+#
+# Relationship-validation is offline and fail-closed at config-load (FR-006,
+# FR-007, FR-013, Principle VIII). The matrix is ARTIFACT-driven (the checklist
+# sentinel pairs only with the checklist relationship; Project/Issue/sub-issue
+# pair with parent/none subject to position rules) rather than hardcoded per
+# level name, so the #17 spec-as-Project alternative (which moves the checklist
+# down to a sub-issue and promotes task→parent) validates correctly.
+# ===========================================================================
+
+readonly -a CONFIG_MAPPING_LEVELS=("repo" "spec" "phase" "task")
+# Artifacts a level may project to. `Initiative` is Linear's above-Project
+# container (used by the #17 spec-as-Project shape and the L0 narrative
+# super-level); `checklist` is an in-body sentinel that projects no standalone
+# artifact. NOTE: a Linear Milestone is NOT in this set — Milestones live
+# *inside* a Project (they sub-divide its timeline) and cannot act as an
+# above-Project container, so the narrative super-level is an `Initiative`.
+readonly -a CONFIG_MAPPING_ARTIFACTS=("Initiative" "Project" "Issue" "sub-issue" "checklist")
+# Allowed hierarchy links. `blocks`/`relates` are dependency links, not nesting,
+# and are rejected (FR-006); anything else is likewise rejected.
+readonly -a CONFIG_MAPPING_RELATIONSHIPS=("parent" "none" "checklist")
+# The artifact the L0 narrative super-level projects to: a Linear Initiative
+# (the real above-Project container). Degrades via on_absent when the workspace
+# plan lacks Initiatives (FR-011).
+readonly CONFIG_MAPPING_L0_ARTIFACT="Initiative"
+
+# Linear-native containment: for a child artifact (key), the set of parent
+# artifacts Linear can actually nest it under. This guards against mappings the
+# validator would otherwise wave through but the projection could never build
+# (e.g. a Project nested under another Project). `checklist` is in-body and is
+# handled by the relationship rules, not this table.
+#   Initiative > Project > Issue > sub-issue
+config::_valid_parent_artifacts() {
+    case "$1" in
+        Initiative) printf '' ;;            # top-level only; Initiatives do not nest
+        Project)    printf 'Initiative' ;;  # a Project belongs to an Initiative
+        Issue)      printf 'Project' ;;     # an Issue belongs to a Project
+        sub-issue)  printf 'Issue' ;;       # a sub-issue parents to an Issue
+        *)          printf '' ;;
+    esac
+}
+
+# config::_mapping_parent_level <level>
+# Echo the resolved parent level of a level in the active hierarchy, or empty
+# when the level is top. repo's parent is the L0 super-level only when enabled.
+config::_mapping_parent_level() {
+    case "$1" in
+        repo)  if config::l0_enabled; then printf 'l0'; fi ;;
+        spec)  printf 'repo' ;;
+        phase) printf 'spec' ;;
+        task)  printf 'phase' ;;
+        *)     return 1 ;;
+    esac
+}
+
+# config::_mapping_level_artifact <level>
+# Echo a level's resolved artifact, transparently handling the synthetic `l0`
+# level (whose artifact comes from config::l0_field, not the levels block).
+config::_mapping_level_artifact() {
+    if [[ "$1" == "l0" ]]; then
+        config::l0_field artifact
+    else
+        config::resolved_artifact "$1"
+    fi
+}
+
+# config::_in_list <needle> <haystack...>
+# Return 0 if <needle> equals one of the remaining args, else 1.
+config::_in_list() {
+    local needle="$1"
+    shift
+    local item
+    for item in "$@"; do
+        if [[ "${item}" == "${needle}" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# config::_mapping_default_artifact <level>
+# Echo the synthesized-default artifact for a level (data-model §1.1).
+config::_mapping_default_artifact() {
+    case "$1" in
+        repo)  printf 'Project' ;;
+        spec)  printf 'Issue' ;;
+        phase) printf 'sub-issue' ;;
+        task)  printf 'checklist' ;;
+        *)     return 1 ;;
+    esac
+}
+
+# config::_mapping_default_relationship <level>
+# Echo the synthesized-default relationship_to_parent for a level (§1.1).
+config::_mapping_default_relationship() {
+    case "$1" in
+        repo)  printf 'none' ;;
+        spec)  printf 'parent' ;;
+        phase) printf 'parent' ;;
+        task)  printf 'checklist' ;;
+        *)     return 1 ;;
+    esac
+}
+
+# config::resolved_artifact <level>
+# Echo the resolved Linear artifact for a level: the explicit
+# mapping.levels.<level>.artifact when present, else the synthesized default
+# (per-level inheritance, FR-005).
+config::resolved_artifact() {
+    config::_require_loaded
+    if (( $# != 1 )); then
+        config::_die "config::resolved_artifact requires exactly one argument (level)"
+    fi
+    local level="$1"
+    local value="${CONFIG_VALUES[linear.mapping.levels.${level}.artifact]:-}"
+    if [[ -z "${value}" ]]; then
+        value="$(config::_mapping_default_artifact "${level}")" \
+            || config::_die "config::resolved_artifact: unknown level '${level}'"
+    fi
+    printf '%s\n' "${value}"
+}
+
+# config::resolved_relationship <level>
+# Echo the resolved relationship_to_parent for a level (explicit or default).
+config::resolved_relationship() {
+    config::_require_loaded
+    if (( $# != 1 )); then
+        config::_die "config::resolved_relationship requires exactly one argument (level)"
+    fi
+    local level="$1"
+    local value="${CONFIG_VALUES[linear.mapping.levels.${level}.relationship_to_parent]:-}"
+    if [[ -z "${value}" ]]; then
+        value="$(config::_mapping_default_relationship "${level}")" \
+            || config::_die "config::resolved_relationship: unknown level '${level}'"
+    fi
+    printf '%s\n' "${value}"
+}
+
+# config::resolved_identity_key <level>
+# Echo the filesystem-derived identity-label PREFIX used to match/update the
+# level's artifact across runs (data-model §5.1). Always derivable (the alias
+# layer synthesizes every prefix default), so a level that projects to a
+# standalone Issue/Project/sub-issue always has a stable key (FR-009).
+config::resolved_identity_key() {
+    config::_require_loaded
+    if (( $# != 1 )); then
+        config::_die "config::resolved_identity_key requires exactly one argument (level)"
+    fi
+    local level="$1" key def
+    case "${level}" in
+        repo)  key="repo_prefix";  def="speckit-repo:" ;;
+        spec)  key="spec_prefix";  def="speckit-spec:" ;;
+        phase) key="phase_prefix"; def="task-phase:" ;;
+        task)  key="task_prefix";  def="speckit-task:" ;;
+        *)     config::_die "config::resolved_identity_key: unknown level '${level}'" ;;
+    esac
+    printf '%s\n' "${CONFIG_VALUES[linear.labels.${key}]:-${def}}"
+}
+
+# config::l0_enabled
+# Return 0 (true) when the narrative super-level is enabled, else 1.
+config::l0_enabled() {
+    config::_require_loaded
+    [[ "${CONFIG_VALUES[linear.mapping.l0.enabled]:-false}" == "true" ]]
+}
+
+# config::l0_field <enabled|artifact|on_absent|source>
+# Echo a resolved L0 field (explicit or synthesized default).
+config::l0_field() {
+    config::_require_loaded
+    if (( $# != 1 )); then
+        config::_die "config::l0_field requires exactly one argument (field)"
+    fi
+    case "$1" in
+        enabled)   printf '%s\n' "${CONFIG_VALUES[linear.mapping.l0.enabled]:-false}" ;;
+        artifact)  printf '%s\n' "${CONFIG_VALUES[linear.mapping.l0.artifact]:-${CONFIG_MAPPING_L0_ARTIFACT}}" ;;
+        on_absent) printf '%s\n' "${CONFIG_VALUES[linear.mapping.l0.on_absent]:-degrade}" ;;
+        source)    printf '%s\n' "${CONFIG_VALUES[linear.mapping.l0.source]:-spec_input}" ;;
+        *)         config::_die "config::l0_field: unknown field '$1' (valid: enabled|artifact|on_absent|source)" ;;
+    esac
+}
+
+# config::is_top_level <level>
+# Return 0 (true) when the level has no parent in the resolved hierarchy:
+# L0 is always top; repo is top only when L0 is disabled.
+config::is_top_level() {
+    config::_require_loaded
+    if (( $# != 1 )); then
+        config::_die "config::is_top_level requires exactly one argument (level)"
+    fi
+    case "$1" in
+        l0)   return 0 ;;
+        repo) if config::l0_enabled; then return 1; else return 0; fi ;;
+        *)    return 1 ;;
+    esac
+}
+
+# config::mapping_validate
+# Single fail-closed gate (exit 2, nothing written) over the resolved mapping:
+# enum membership, the offline relationship-validation matrix (artifact-driven +
+# position rules), the L0 field constraints, and required identity-prefix
+# presence for standalone-artifact levels. MUST run at config-load before any
+# write (FR-007, FR-013). Returns 0 when the mapping is valid.
+config::mapping_validate() {
+    config::_require_loaded
+
+    local -a problems=()
+    local path="${CONFIG_LOADED_PATH}"
+
+    # ---- L0 super-level field constraints ---------------------------------
+    local l0_on="false"
+    local l0_enabled_raw="${CONFIG_VALUES[linear.mapping.l0.enabled]:-false}"
+    if [[ "${l0_enabled_raw}" != "true" && "${l0_enabled_raw}" != "false" ]]; then
+        problems+=("${path}: mapping.l0.enabled: got '${l0_enabled_raw}', expected true|false")
+    fi
+    if [[ "${l0_enabled_raw}" == "true" ]]; then
+        l0_on="true"
+        local l0_artifact="${CONFIG_VALUES[linear.mapping.l0.artifact]:-Initiative}"
+        local l0_on_absent="${CONFIG_VALUES[linear.mapping.l0.on_absent]:-degrade}"
+        local l0_source="${CONFIG_VALUES[linear.mapping.l0.source]:-spec_input}"
+        if [[ "${l0_artifact}" != "Initiative" ]]; then
+            problems+=("${path}: mapping.l0.artifact: got '${l0_artifact}', only 'Initiative' is supported (Linear Milestones live inside a Project and cannot be an above-Project narrative container)")
+        fi
+        if [[ "${l0_on_absent}" != "degrade" ]]; then
+            problems+=("${path}: mapping.l0.on_absent: got '${l0_on_absent}', only 'degrade' is supported")
+        fi
+        if [[ "${l0_source}" != "spec_input" ]]; then
+            problems+=("${path}: mapping.l0.source: got '${l0_source}', only 'spec_input' is supported (the narrative is never inferred, FR-012)")
+        fi
+    fi
+
+    # ---- per-level artifact + relationship matrix -------------------------
+    local level artifact rel
+    for level in "${CONFIG_MAPPING_LEVELS[@]}"; do
+        artifact="$(config::resolved_artifact "${level}")"
+        rel="$(config::resolved_relationship "${level}")"
+
+        if ! config::_in_list "${artifact}" "${CONFIG_MAPPING_ARTIFACTS[@]}"; then
+            problems+=("${path}: mapping.levels.${level}.artifact: invalid value '${artifact}' (valid: ${CONFIG_MAPPING_ARTIFACTS[*]})")
+            continue
+        fi
+        if ! config::_in_list "${rel}" "${CONFIG_MAPPING_RELATIONSHIPS[@]}"; then
+            problems+=("${path}: mapping.levels.${level}.relationship_to_parent: invalid hierarchy link '${rel}' (valid: ${CONFIG_MAPPING_RELATIONSHIPS[*]}; 'blocks'/'relates' are dependency links, not nesting)")
+            continue
+        fi
+
+        if [[ "${artifact}" == "checklist" ]]; then
+            # The checklist sentinel is task-level only and must pair with the
+            # checklist relationship (data-model §3, §4.2).
+            if [[ "${level}" != "task" ]]; then
+                problems+=("${path}: mapping.levels.${level}.artifact: 'checklist' is only valid at the task level")
+            fi
+            if [[ "${rel}" != "checklist" ]]; then
+                problems+=("${path}: mapping.levels.${level}: the 'checklist' artifact must pair with relationship_to_parent 'checklist' (got '${rel}')")
+            fi
+        else
+            # A standalone artifact must not use the checklist relationship.
+            if [[ "${rel}" == "checklist" ]]; then
+                problems+=("${path}: mapping.levels.${level}: relationship_to_parent 'checklist' is only valid with the 'checklist' artifact (artifact is '${artifact}')")
+            fi
+            # Position rules: the top level links with 'none' (repo may link
+            # 'parent' only when L0 nests above it); every non-top level must
+            # have a parent ('none' is rejected).
+            case "${level}" in
+                repo)
+                    if [[ "${rel}" == "parent" && "${l0_on}" != "true" ]]; then
+                        problems+=("${path}: mapping.levels.repo.relationship_to_parent: 'parent' requires the L0 super-level to be enabled (repo is the top level otherwise)")
+                    fi
+                    ;;
+                spec|phase|task)
+                    if [[ "${rel}" == "none" ]]; then
+                        problems+=("${path}: mapping.levels.${level}.relationship_to_parent: 'none' is invalid; ${level} always has a parent")
+                    fi
+                    ;;
+            esac
+        fi
+    done
+
+    # ---- Linear-native containment (nesting) validation -------------------
+    # For every non-top level linked by `parent`, the parent level's resolved
+    # artifact must be one Linear can actually nest the child under
+    # (Initiative > Project > Issue > sub-issue). This rejects mappings the
+    # relationship rules alone would accept but the projection could never
+    # build — e.g. a Project under a Project (use an Initiative as the parent
+    # level for the #17 spec-as-Project shape).
+    for level in "${CONFIG_MAPPING_LEVELS[@]}"; do
+        artifact="$(config::resolved_artifact "${level}")"
+        rel="$(config::resolved_relationship "${level}")"
+        if [[ "${artifact}" == "checklist" || "${rel}" != "parent" ]]; then
+            continue
+        fi
+        local parent_level parent_artifact valid_parents
+        parent_level="$(config::_mapping_parent_level "${level}")" || parent_level=""
+        if [[ -z "${parent_level}" ]]; then
+            continue
+        fi
+        parent_artifact="$(config::_mapping_level_artifact "${parent_level}")"
+        valid_parents="$(config::_valid_parent_artifacts "${artifact}")"
+        # Word-split intentional: valid_parents is a space-separated allow-list.
+        # shellcheck disable=SC2086
+        if ! config::_in_list "${parent_artifact}" ${valid_parents}; then
+            problems+=("${path}: mapping.levels.${level}: a '${artifact}' cannot nest under a '${parent_artifact}' (the ${parent_level} level); Linear allows Initiative > Project > Issue > sub-issue.${valid_parents:+ Valid parent artifact: ${valid_parents}.}")
+        fi
+    done
+
+    # ---- required identity prefix for a standalone task level (FR-009) -----
+    local task_artifact
+    task_artifact="$(config::resolved_artifact task)"
+    if [[ "${task_artifact}" != "checklist" ]]; then
+        if [[ -z "$(config::resolved_identity_key task)" ]]; then
+            problems+=("${path}: linear.labels.task_prefix: required when the task level projects to a standalone '${task_artifact}' so re-runs match rather than re-create (FR-009)")
+        fi
+    fi
+
+    if (( ${#problems[@]} > 0 )); then
+        config::_warn "mapping validation failed for ${path}:"
+        local problem
+        for problem in "${problems[@]}"; do
+            printf '  - %s\n' "${problem}" >&2
+        done
+        exit 2
+    fi
+
+    return 0
+}
