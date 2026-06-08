@@ -2099,6 +2099,90 @@ reconcile::link_project_to_initiative() {
     return 0
 }
 
+# reconcile::_repo_slug
+#   Echo a stable, filesystem-derived repo slug for the repo-level identity
+#   marker (the git toplevel basename, falling back to PWD). Never minted from
+#   Linear state (Principle II).
+reconcile::_repo_slug() {
+    local top
+    top="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+    if [[ -n "$top" ]]; then
+        basename "$top"
+    else
+        basename "$PWD"
+    fi
+}
+
+# reconcile::process_spec_mapped <spec_dir>
+#   The non-default projection path (dispatched when config::mapping_is_default
+#   is false). This first increment projects the #17 spec-as-Project CONTAINER
+#   hierarchy — repo→Initiative and spec→Project, nested — idempotently via the
+#   tested leaf helpers. The within-Project phase→Issue / task→sub-issue
+#   projection and the mapped-path backward-drift anchor are the next
+#   sub-increment; until they land this surfaces a loud notice (Principle VIII —
+#   never a silent partial). Any other valid-but-unimplemented mapping
+#   combination is likewise surfaced and skipped, writing nothing.
+reconcile::process_spec_mapped() {
+    local spec_dir="$1"
+
+    local feature_number short_name spec_md
+    if ! feature_number="$(parser::feature_number "$spec_dir")"; then
+        summary::add warned "spec dir ${spec_dir}: basename does not match NNN-<slug>; skipping"
+        return 0
+    fi
+    if ! short_name="$(parser::short_name "$spec_dir")"; then
+        summary::add warned "spec dir ${spec_dir}: cannot extract short name; skipping"
+        return 0
+    fi
+    spec_md="${spec_dir%/}/spec.md"
+    if [[ ! -s "$spec_md" ]]; then
+        summary::add warned "spec ${feature_number}: spec.md missing or empty; skipping"
+        return 0
+    fi
+
+    local repo_artifact spec_artifact
+    repo_artifact="$(config::resolved_artifact repo)"
+    spec_artifact="$(config::resolved_artifact spec)"
+
+    # Only the #17 spec-as-Project chain is implemented in the mapped path so
+    # far. Every other combination is VALID (the config-load matrix accepted
+    # it) but its projection is not yet built — surface and skip, writing
+    # nothing, rather than half-mirror.
+    if [[ "$repo_artifact" != "Initiative" || "$spec_artifact" != "Project" ]]; then
+        summary::add warned "spec ${feature_number}: configured mapping (repo→${repo_artifact}, spec→${spec_artifact}) is valid but its projection is not yet implemented (only the #17 shape: repo→Initiative, spec→Project). No writes performed."
+        return 0
+    fi
+
+    local team_id repo_slug spec_content
+    team_id="$(config::get_team_id)"
+    repo_slug="$(reconcile::_repo_slug)"
+    spec_content="$(reconcile::render_spec_content_block "$spec_dir" 2>/dev/null || true)"
+
+    # repo → Initiative (the above-Project container).
+    local initiative_id
+    initiative_id="$(reconcile::ensure_initiative "speckit-repo:${repo_slug}" "${repo_slug}" "")"
+
+    # spec → Project, nested under the Initiative.
+    local spec_marker spec_name project_id
+    spec_marker="speckit-spec:${feature_number}"
+    spec_name="${feature_number}-${short_name}"
+    project_id="$(reconcile::ensure_project "$spec_marker" "$spec_name" "$spec_content" "$team_id")"
+    if [[ -z "$project_id" || "$project_id" == "null" ]]; then
+        summary::add error "spec ${feature_number}: mapped spec→Project create failed"
+        return 0
+    fi
+    if [[ -n "$initiative_id" && "$initiative_id" != "null" ]]; then
+        reconcile::link_project_to_initiative "$project_id" "$initiative_id" || true
+    fi
+
+    # phase → Issue / task → sub-issue projection + the mapped-path drift anchor
+    # land in the next sub-increment. Loud notice so the partial mirror is never
+    # mistaken for a complete one (Principle VIII).
+    summary::add warned "spec ${feature_number}: #17 containers projected (Initiative + Project); phase→Issue / task→sub-issue projection + drift anchor land in the next increment"
+    reconcile::log "spec ${feature_number}: mapped #17 container projection complete (project=${project_id})"
+    return 0
+}
+
 # =============================================================================
 # Per-spec orchestration.
 # =============================================================================
@@ -3514,6 +3598,15 @@ reconcile::pr_state_hint() {
 #   --all sweep (FR-024).
 reconcile::process_spec() {
     local spec_dir="$1"
+
+    # spec 007 — dispatch to the mapped projection path when the operator has
+    # configured a non-default mapping (any level overridden or L0 on). The
+    # default path below is the battle-tested, unchanged 001 projection
+    # (projection-design.md, Decision 1).
+    if ! config::mapping_is_default; then
+        reconcile::process_spec_mapped "$spec_dir"
+        return $?
+    fi
 
     local feature_number short_name spec_md
     if ! feature_number="$(parser::feature_number "$spec_dir")"; then

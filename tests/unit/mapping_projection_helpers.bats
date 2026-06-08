@@ -189,3 +189,93 @@ teardown() {
     [ "${status}" -eq 0 ]
     grep -q "addInitiativeIds" "${CALLS}"
 }
+
+# ---------------------------------------------------------------------------
+# process_spec_mapped — #17 container orchestration (leaf helpers stubbed)
+# ---------------------------------------------------------------------------
+
+# Write a #17 spec-as-Project config and a minimal spec dir.
+_write_17_config_and_spec() {
+    CFG="${TEST_TMP}/linear-config.yml"
+    cat > "${CFG}" <<'EOF'
+schema_version: 1
+
+linear:
+  team:
+    id: "11111111-1111-1111-1111-111111111111"
+  project:
+    id: "22222222-2222-2222-2222-222222222222"
+  mapping:
+    levels:
+      repo:
+        artifact: "Initiative"
+        relationship_to_parent: "none"
+      spec:
+        artifact: "Project"
+        relationship_to_parent: "parent"
+      phase:
+        artifact: "Issue"
+        relationship_to_parent: "parent"
+      task:
+        artifact: "sub-issue"
+        relationship_to_parent: "parent"
+EOF
+    SPEC_DIR="${TEST_TMP}/specs/007-demo"
+    mkdir -p "${SPEC_DIR}"
+    printf '# Spec\n\n**Input**: do a thing\n\n## Overview\n\nBody.\n' > "${SPEC_DIR}/spec.md"
+    export CFG SPEC_DIR
+}
+
+@test "process_spec_mapped projects the #17 containers (Initiative + Project + link)" {
+    _write_17_config_and_spec
+    run bash -c '
+        source "${RECONCILE_SH}" 2>/dev/null
+        reconcile::log() { :; }; summary::add() { :; }
+        config::load "${CFG}"
+        reconcile::ensure_initiative() { echo "INIT $1" >> "$CALLS"; printf "init-1"; }
+        reconcile::ensure_project() { echo "PROJ $1" >> "$CALLS"; printf "proj-1"; }
+        reconcile::link_project_to_initiative() { echo "LINK $1 $2" >> "$CALLS"; }
+        reconcile::render_spec_content_block() { printf "content"; }
+        reconcile::_repo_slug() { printf "my-repo"; }
+        reconcile::process_spec_mapped "${SPEC_DIR}"
+    '
+    [ "${status}" -eq 0 ]
+    grep -q "INIT speckit-repo:my-repo" "${CALLS}"
+    grep -q "PROJ speckit-spec:007" "${CALLS}"
+    grep -q "LINK proj-1 init-1" "${CALLS}"
+}
+
+@test "process_spec_mapped skips (no writes) for a valid-but-unimplemented combo" {
+    # L0 on + default levels → repo stays Project, spec stays Issue → not the
+    # #17 chain → surfaced and skipped, nothing created.
+    CFG="${TEST_TMP}/linear-config.yml"
+    cat > "${CFG}" <<'EOF'
+schema_version: 1
+
+linear:
+  team:
+    id: "11111111-1111-1111-1111-111111111111"
+  project:
+    id: "22222222-2222-2222-2222-222222222222"
+  mapping:
+    l0:
+      enabled: true
+      artifact: "Initiative"
+      on_absent: "degrade"
+      source: "spec_input"
+EOF
+    SPEC_DIR="${TEST_TMP}/specs/007-demo"
+    mkdir -p "${SPEC_DIR}"
+    printf '# Spec\n\n## Overview\n\nBody.\n' > "${SPEC_DIR}/spec.md"
+    export CFG SPEC_DIR
+    run bash -c '
+        source "${RECONCILE_SH}" 2>/dev/null
+        reconcile::log() { :; }; summary::add() { :; }
+        config::load "${CFG}"
+        reconcile::ensure_initiative() { echo "INIT" >> "$CALLS"; printf "x"; }
+        reconcile::ensure_project() { echo "PROJ" >> "$CALLS"; printf "x"; }
+        reconcile::process_spec_mapped "${SPEC_DIR}"
+    '
+    [ "${status}" -eq 0 ]
+    [ ! -s "${CALLS}" ]   # valid-but-unimplemented combo → nothing written
+}
