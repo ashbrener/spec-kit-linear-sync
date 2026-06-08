@@ -340,3 +340,70 @@ EOF
     [ "${status}" -eq 0 ]
     [ "${output}" = "0" ]
 }
+
+# ---------------------------------------------------------------------------
+# _project_l0_initiative — L0 narrative super-level (US4)
+# ---------------------------------------------------------------------------
+
+_write_l0_config_and_spec() {
+    CFG="${TEST_TMP}/linear-config.yml"
+    cat > "${CFG}" <<'EOF'
+schema_version: 1
+
+linear:
+  team:
+    id: "11111111-1111-1111-1111-111111111111"
+  project:
+    id: "22222222-2222-2222-2222-222222222222"
+  mapping:
+    l0:
+      enabled: true
+      artifact: "Initiative"
+      on_absent: "degrade"
+      source: "spec_input"
+EOF
+    SPEC_DIR="${TEST_TMP}/specs/007-demo"
+    mkdir -p "${SPEC_DIR}"
+    printf '# Spec\n\n**Input**: build the thing\n\n## Overview\n\nBody.\n' > "${SPEC_DIR}/spec.md"
+    export CFG SPEC_DIR
+}
+
+@test "_project_l0_initiative ensures the Initiative + links the repo Project when available" {
+    _write_l0_config_and_spec
+    run bash -c '
+        source "${RECONCILE_SH}" 2>/dev/null
+        reconcile::log() { :; }; summary::add() { :; }
+        config::load "${CFG}"
+        reconcile::_l0_initiative_available() { return 0; }
+        reconcile::_repo_slug() { printf "my-repo"; }
+        reconcile::_extract_input() { printf "build the thing"; }
+        reconcile::ensure_initiative() { echo "INIT $1 narrative=$3" >> "$CALLS"; printf "init-1"; }
+        reconcile::link_project_to_initiative() { echo "LINK $1 $2" >> "$CALLS"; }
+        reconcile::_degrade_l0_onto_repo() { echo "DEGRADE" >> "$CALLS"; }
+        reconcile::_project_l0_initiative "${SPEC_DIR}"
+    '
+    [ "${status}" -eq 0 ]
+    grep -q "INIT speckit-repo:my-repo narrative=build the thing" "${CALLS}"   # narrative from Input only
+    grep -q "LINK 22222222-2222-2222-2222-222222222222 init-1" "${CALLS}"      # bound repo Project nested
+    ! grep -q "DEGRADE" "${CALLS}"
+}
+
+@test "_project_l0_initiative degrades onto the repo Project when Initiatives are unavailable" {
+    _write_l0_config_and_spec
+    run bash -c '
+        source "${RECONCILE_SH}" 2>/dev/null
+        reconcile::log() { :; }; summary::add() { :; }
+        config::load "${CFG}"
+        reconcile::_l0_initiative_available() { return 1; }   # plan-gated
+        reconcile::_repo_slug() { printf "my-repo"; }
+        reconcile::_extract_input() { printf "build the thing"; }
+        reconcile::ensure_initiative() { echo "INIT" >> "$CALLS"; printf "init-1"; }
+        reconcile::link_project_to_initiative() { echo "LINK" >> "$CALLS"; }
+        reconcile::_degrade_l0_onto_repo() { echo "DEGRADE $1 narrative=$2" >> "$CALLS"; }
+        reconcile::_project_l0_initiative "${SPEC_DIR}"
+    '
+    [ "${status}" -eq 0 ]
+    grep -q "DEGRADE my-repo narrative=build the thing" "${CALLS}"   # folded onto repo, narrative preserved
+    ! grep -q "^INIT" "${CALLS}"                                     # no Initiative created
+    ! grep -q "^LINK" "${CALLS}"
+}

@@ -2266,6 +2266,91 @@ reconcile::_repo_slug() {
     fi
 }
 
+# reconcile::_l0_initiative_available
+#   Probe whether Linear Initiatives are usable on this workspace (the L0
+#   super-level artifact). Read-only. The probe runs in a SUBSHELL so
+#   graphql::query's fail-closed `exit` only kills the probe (we want a
+#   true/false here, not a halt). Return 0 when the `initiatives` query
+#   succeeds, 1 when it errors (plan-gated / capability gap → degrade path).
+reconcile::_l0_initiative_available() {
+    if ( graphql::query 'query L0Probe { initiatives(first: 1) { nodes { id } } }' '{}' >/dev/null 2>&1 ); then
+        return 0
+    fi
+    return 1
+}
+
+# reconcile::_degrade_l0_onto_repo <repo_slug> <narrative>
+#   Graceful degradation (FR-011): when Initiatives are unavailable, fold the L0
+#   narrative onto the repo level (the bound Project) behind a stable marker so
+#   the narrative always lands and the run never hard-fails. Idempotent — the
+#   marker check makes a re-run zero churn. The narrative is the explicit
+#   spec-input only (FR-012); never inferred.
+reconcile::_degrade_l0_onto_repo() {
+    local repo_slug="$1" narrative="$2"
+    local pid marker
+    pid="$(config::get_project_id)"
+    marker="$(reconcile::mapping_id_marker "speckit-narrative:${repo_slug}")"
+
+    local q resp cur
+    q='query L0RepoDesc($id: String!) { project(id: $id) { description } }'
+    resp="$(graphql::query "$q" "$(jq -nc --arg id "$pid" '{id: $id}')" 2>/dev/null)" || return 0
+    cur="$(printf '%s' "$resp" | jq -r '.data.project.description // ""')"
+    if [[ "$cur" == *"$marker"* ]]; then
+        summary::add skipped "L0 narrative degrade (already folded onto repo Project)"
+        return 0
+    fi
+
+    local desired
+    if [[ -n "$cur" ]]; then
+        desired="${cur}"$'\n\n'"${marker}"$'\n'"${narrative}"
+    else
+        desired="${marker}"$'\n'"${narrative}"
+    fi
+    if (( ARG_DRY_RUN == 1 )); then
+        summary::add warned "L0 super-level: Initiatives unavailable — narrative would fold onto the repo Project (dry-run, degraded)"
+        return 0
+    fi
+    local mut mvars
+    mut='mutation L0Degrade($id: String!, $input: ProjectUpdateInput!) { projectUpdate(id: $id, input: $input) { success } }'
+    mvars="$(jq -nc --arg id "$pid" --arg d "$desired" '{id: $id, input: {description: $d}}')"
+    if ! graphql::mutate "$mut" "$mvars" >/dev/null 2>&1; then
+        summary::add error "L0 narrative degrade: projectUpdate failed"
+        return 1
+    fi
+    summary::add warned "L0 super-level: Initiatives unavailable on this workspace — narrative folded onto the repo Project (degraded, FR-011)"
+    return 0
+}
+
+# reconcile::_project_l0_initiative <spec_dir>
+#   Project the off-by-default L0 narrative super-level above the repo level
+#   (FR-011/FR-012). Narrative comes ONLY from the spec's `**Input**:` line.
+#   Where Initiatives are available: ensure the Initiative and nest the bound
+#   repo Project under it. Where unavailable: degrade onto the repo Project.
+#   The L0 level is narrative-only and is NEVER a backward-drift surface
+#   (FR-010). Non-fatal: a failure here must not abort the spec's default
+#   projection that follows.
+reconcile::_project_l0_initiative() {
+    local spec_dir="$1"
+    local repo_slug narrative
+    repo_slug="$(reconcile::_repo_slug)"
+    narrative="$(reconcile::_extract_input "${spec_dir%/}/spec.md" 2>/dev/null || true)"
+
+    if ! reconcile::_l0_initiative_available; then
+        reconcile::_degrade_l0_onto_repo "$repo_slug" "$narrative" || true
+        return 0
+    fi
+
+    local initiative_id project_id
+    initiative_id="$(reconcile::ensure_initiative "speckit-repo:${repo_slug}" "${repo_slug}" "$narrative")" || initiative_id=""
+    if [[ -z "$initiative_id" || "$initiative_id" == "null" ]]; then
+        reconcile::_degrade_l0_onto_repo "$repo_slug" "$narrative" || true
+        return 0
+    fi
+    project_id="$(config::get_project_id)"
+    reconcile::link_project_to_initiative "$project_id" "$initiative_id" || true
+    return 0
+}
+
 # reconcile::process_spec_mapped <spec_dir>
 #   The non-default projection path (dispatched when config::mapping_is_default
 #   is false). This first increment projects the #17 spec-as-Project CONTAINER
@@ -3811,13 +3896,31 @@ reconcile::pr_state_hint() {
 reconcile::process_spec() {
     local spec_dir="$1"
 
-    # spec 007 — dispatch to the mapped projection path when the operator has
-    # configured a non-default mapping (any level overridden or L0 on). The
-    # default path below is the battle-tested, unchanged 001 projection
-    # (projection-design.md, Decision 1).
+    # spec 007 — dispatch by configured mapping (projection-design.md Decision 1).
+    # Default mapping → the battle-tested 001 projection below, unchanged.
     if ! config::mapping_is_default; then
-        reconcile::process_spec_mapped "$spec_dir"
-        return $?
+        local _disp_repo _disp_spec
+        _disp_repo="$(config::resolved_artifact repo)"
+        _disp_spec="$(config::resolved_artifact spec)"
+        if [[ "$_disp_repo" == "Initiative" && "$_disp_spec" == "Project" ]]; then
+            # #17 spec-as-Project chain → the mapped projection path.
+            reconcile::process_spec_mapped "$spec_dir"
+            return $?
+        fi
+        if config::l0_enabled && config::mapping_levels_are_default; then
+            # L0 narrative super-level above an otherwise-default projection
+            # (US4): add the Initiative above the repo Project, then FALL
+            # THROUGH to the unchanged default projection below.
+            reconcile::_project_l0_initiative "$spec_dir" || true
+            # fall through (no return)
+        else
+            # Other valid-but-unimplemented combinations: surface and skip,
+            # writing nothing (Principle VIII — never a silent partial).
+            local _skip_fn
+            _skip_fn="$(parser::feature_number "$spec_dir" 2>/dev/null || printf '%s' "${spec_dir}")"
+            summary::add warned "spec ${_skip_fn}: configured mapping (repo→${_disp_repo}, spec→${_disp_spec}) is valid but its projection is not yet implemented. No writes performed."
+            return 0
+        fi
     fi
 
     local feature_number short_name spec_md

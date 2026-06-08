@@ -229,6 +229,39 @@ validate() {
     [ "${output}" = "MAPPED" ]
 }
 
+@test "mapping_levels_are_default: true when only L0 is on (levels still default)" {
+    write_config '  mapping:
+    l0:
+      enabled: true
+      artifact: "Initiative"
+      on_absent: "degrade"
+      source: "spec_input"'
+    run bash -c "source '${CONFIG_SH}'; config::load '${CFG}'; if config::mapping_levels_are_default; then echo LEVELS_DEFAULT; else echo LEVELS_CUSTOM; fi; if config::mapping_is_default; then echo IS_DEFAULT; else echo NOT_DEFAULT; fi"
+    [ "${status}" -eq 0 ]
+    [ "${lines[0]}" = "LEVELS_DEFAULT" ]   # levels are default...
+    [ "${lines[1]}" = "NOT_DEFAULT" ]      # ...but L0-on means not the frozen default
+}
+
+@test "mapping_levels_are_default: false for the #17 shape" {
+    write_config '  mapping:
+    levels:
+      repo:
+        artifact: "Initiative"
+        relationship_to_parent: "none"
+      spec:
+        artifact: "Project"
+        relationship_to_parent: "parent"
+      phase:
+        artifact: "Issue"
+        relationship_to_parent: "parent"
+      task:
+        artifact: "sub-issue"
+        relationship_to_parent: "parent"'
+    run bash -c "source '${CONFIG_SH}'; config::load '${CFG}'; if config::mapping_levels_are_default; then echo LEVELS_DEFAULT; else echo LEVELS_CUSTOM; fi"
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "LEVELS_CUSTOM" ]
+}
+
 @test "mapping_is_default: true for an explicit default block (alias equivalence)" {
     write_config '  mapping:
     levels:

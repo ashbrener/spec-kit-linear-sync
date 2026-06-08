@@ -1148,6 +1148,17 @@ config::mapping_is_default() {
     if config::l0_enabled; then
         return 1
     fi
+    config::mapping_levels_are_default
+}
+
+# config::mapping_levels_are_default
+# Like config::mapping_is_default but IGNORING the L0 super-level: return 0 when
+# all four levels (repo/spec/phase/task) resolve to their default artifact +
+# relationship, regardless of whether L0 is enabled. Lets reconcile recognise
+# the "L0 super-level above an otherwise-default projection" combo (US4) — the
+# Initiative is added above, and the default issue projection runs unchanged.
+config::mapping_levels_are_default() {
+    config::_require_loaded
     local level
     for level in "${CONFIG_MAPPING_LEVELS[@]}"; do
         [[ "$(config::resolved_artifact "${level}")" == "$(config::_mapping_default_artifact "${level}")" ]] || return 1
