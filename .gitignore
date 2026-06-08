@@ -5,12 +5,14 @@
 *.pem
 *.key
 
-# Per-consumer Linear binding — holds the operator's real workspace/team/
-# project/user UUIDs + identity. Self-describing-repo (Principle V) is
-# satisfied by the committed `config-template.yml`; the resolved
-# `linear-config.yml` is local-only so a public repo never leaks the
-# operator's Linear coordinates. Bootstrap: copy the template, run install.
-.specify/extensions/linear/linear-config.yml
+# Operator-local identity (spec 004 — config / identity split). The
+# resolved `linear-config.yml` is COMMITTED — it holds only the shareable
+# binding (team/project UUIDs, workflow-state + label maps, toggles), no
+# personal data. The operator's identity (user_id, name, email) lives in
+# a gitignored operator-local file matched by this glob, so a public repo
+# never leaks the operator's Linear identity. `speckit.linear.install`
+# scaffolds the file and guarantees this entry (FR-002, FR-003, FR-004).
+.specify/extensions/linear/*.local.yml
 
 # OS detritus
 .DS_Store

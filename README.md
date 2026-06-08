@@ -70,13 +70,13 @@ Once the extension is listed in the catalog, the shorter form will work:
 specify extension add linear
 ```
 
-Either path registers the `after_*` hooks into your project's `.specify/extensions.yml`, drops local git hooks into `.git/hooks/`, and scaffolds `.specify/extensions/linear/linear-config.yml`.
+Either path registers the `after_*` hooks into your project's `.specify/extensions.yml`, drops local git hooks into `.git/hooks/`, scaffolds the committed `.specify/extensions/linear/linear-config.yml`, and creates the gitignored `.specify/extensions/linear/linear-operator.local.yml` for your identity.
 
 If the install reports a vendored `.git/` warning under `.specify/extensions/linear/`, run `rm -rf .specify/extensions/linear/.git` and re-run the install (FR-049). The bridge does not auto-delete that directory — operator consent is required.
 
 ## Adopt — the 3 steps every project takes
 
-1. **Run `/speckit.linear.install`.** This is the interactive install ceremony. It resolves your Linear Team UUID (auto-picks if your workspace has one team; prompts otherwise), creates or attaches a Linear Project for this repo, captures your operator identity via Linear's `viewer` query, writes everything to `.specify/extensions/linear/linear-config.yml` (committed to the repo so collaborators inherit the binding), and optionally installs the GitHub Action layer.
+1. **Run `/speckit.linear.install`.** This is the interactive install ceremony. It resolves your Linear Team UUID (auto-picks if your workspace has one team; prompts otherwise), creates or attaches a Linear Project for this repo, writes the shareable binding to `.specify/extensions/linear/linear-config.yml` (committed so collaborators inherit it), captures your operator identity via Linear's `viewer` query and writes it to the gitignored `.specify/extensions/linear/linear-operator.local.yml`, and optionally installs the GitHub Action layer.
 
 2. **Run `/speckit.linear.seed`.** One-shot per Linear workspace — creates the 9 lifecycle workflow states (`Specifying`, `Clarifying`, `Planning`, `Tasking`, `Red-team`, `Implementing`, `Analyzing`, `Ready-to-merge`, `Merged`), the 9 `phase:*` labels, and `task-phase:1`..`task-phase:9`. Captures every UUID at creation and writes it back into `linear-config.yml` (per FR-032) so renames in Linear's UI never break the bridge.
 
@@ -88,7 +88,7 @@ The five command surface:
 
 | Command | Direction | Description |
 |---|---|---|
-| `/speckit.linear.install` | install-time only | Resolves Team / Project / operator UUIDs, writes `linear-config.yml`, registers hooks, optionally installs the GitHub Action. |
+| `/speckit.linear.install` | install-time only | Resolves Team / Project UUIDs, writes the committed `linear-config.yml`, scaffolds the gitignored `linear-operator.local.yml` (your identity), registers hooks, optionally installs the GitHub Action. |
 | `/speckit.linear.seed` | workspace setup | Creates lifecycle workflow states + labels. Idempotent; safe to re-run. |
 | `/speckit.linear.push` | disk → Linear (write) | The reconciler. Fires automatically on every `/speckit.*` hook; also invokable on demand. |
 | `/speckit.linear.pull` | Linear → terminal (read-only) | Cross-repo unified inspect. Surfaces every spec Issue across every repo bound to the workspace. |
@@ -170,18 +170,42 @@ The other invariant worth knowing: **write-authority follows the filesystem** (C
 
 ## Configuration
 
-`linear-config.yml` is created by `/speckit.linear.install` and committed to your repo. Schema (full spec at [`specs/001-spec-kit-linear-bridge/contracts/config-schema.json`](./specs/001-spec-kit-linear-bridge/contracts/config-schema.json)):
+The bridge uses a **two-file model** (spec [`004-config-identity-split`](./specs/004-config-identity-split/spec.md)) so the shareable binding can be committed safely while each operator's identity stays local:
+
+| File | Committed? | Holds |
+|---|---|---|
+| `.specify/extensions/linear/linear-config.yml` | **Yes — committed** | The shareable binding: team/project UUIDs, workflow-state + label UUID maps, and behaviour toggles. No personal data. Cloning the repo gives a collaborator everything they need to sync. |
+| `.specify/extensions/linear/linear-operator.local.yml` | **No — gitignored** | The operator's identity: `user_id` (Linear assignee), name, email. Scaffolded by `/speckit.linear.install`, which also guarantees `*.local.yml` is in `.gitignore` (FR-002, FR-003). |
+
+`linear-config.yml` schema (full spec at [`specs/001-spec-kit-linear-bridge/contracts/config-schema.json`](./specs/001-spec-kit-linear-bridge/contracts/config-schema.json)):
 
 | Field | Required | Description |
 |---|---|---|
-| `linear.team_id` | Yes | UUID of the Linear Team that owns this repo's Project. Resolved at install. |
-| `linear.project_id` | Yes | UUID of the Linear Project mirroring this repo. One Project per consumer repo. |
-| `linear.operator.user_id` | Yes | UUID of the operator running install — stamped as `assigneeId` on every `issueCreate` (FR-034). Single-write-on-create: manual Linear-side reassignment persists. |
-| `linear.operator.name`, `.email` | No | Informational; surfaced in install summary + memory block. |
+| `linear.team.id` | Yes | UUID of the Linear Team that owns this repo's Project. Resolved at install. |
+| `linear.project.id` | Yes | UUID of the Linear Project mirroring this repo. One Project per consumer repo. |
 | `linear.workflow_state_uuids` | Yes | Map of lifecycle-phase identifier → state UUID. Populated by `/speckit.linear.seed`. Renames in Linear's UI are safe (FR-032). |
 | `linear.default_state_uuids` | Yes | UUIDs of the three sub-issue states (`todo` / `in_progress` / `done`). Auto-resolved at seed time. |
 
-`.env` (gitignored) holds `LINEAR_API_KEY` for the local reconcile path. The shipped GitHub Action uses `LINEAR_API_TOKEN` set as a repo secret per `/speckit.linear.install`'s instructions.
+`linear-operator.local.yml` schema (gitignored):
+
+| Field | Required | Description |
+|---|---|---|
+| `operator.user_id` | No | UUID of the operator — stamped as `assigneeId` on every `issueCreate`. When absent, the bridge warns and creates issues unassigned (it never fails the sync, FR-011). Single-write-on-create: manual Linear-side reassignment persists. |
+| `operator.name`, `operator.email` | No | Informational; surfaced in install summary + memory block. |
+
+### Resolution cascade (identity and API key)
+
+Both the operator identity and the `LINEAR_API_KEY` resolve through the same documented precedence (FR-005, FR-006):
+
+1. **Environment** — `LINEAR_OPERATOR_USER_ID` / `LINEAR_API_KEY` (highest; CI and ephemeral overrides win).
+2. **Operator-local file** — `linear-operator.local.yml`.
+3. **`.env`** (key only) / **interactive prompt** (install path).
+
+Reconcile resolves the operator assignee via this cascade and **never** reads identity from the committed `linear-config.yml`. Because the key resolves from the environment or the discoverable operator-local file, a linked worktree no longer needs its own copied `.env` (issue #20). `.env` (gitignored) and `linear-operator.local.yml` (gitignored) both hold secrets/identity locally. The shipped GitHub Action uses `LINEAR_API_TOKEN` set as a repo secret per `/speckit.linear.install`'s instructions.
+
+### Upgrading from a single-file config
+
+A pre-split `linear-config.yml` that still carries an `operator:` block keeps working. On the first run the bridge moves the identity into `linear-operator.local.yml`, strips the `operator:` block from the committed config, and emits exactly one migration notice. It's idempotent — subsequent runs are silent (FR-007).
 
 ## Troubleshooting
 

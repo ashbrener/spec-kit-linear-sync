@@ -442,3 +442,145 @@ EOF
     [ "${status}" -eq 2 ]
     [[ "${output}" == *"no config loaded"* ]]
 }
+
+# ---------------------------------------------------------------------------
+# spec 004 — config / identity split
+# ---------------------------------------------------------------------------
+
+# write_operator_local <path> <user_id> [name] [email]
+# Drop a minimal operator-local identity file.
+write_operator_local() {
+    local path="$1" uid="$2" name="${3:-Local Operator}" email="${4:-local@example.com}"
+    cat > "${path}" <<EOF
+schema_version: 1
+operator:
+  user_id: "${uid}"
+  name: "${name}"
+  email: "${email}"
+EOF
+}
+
+@test "FR-001: the committed config fixture carries no operator identity" {
+    # The shareable binding fixture must have no operator.* keys, and all
+    # existing getters/validate must still pass (FR-001 + FR-009).
+    run grep -q 'operator:' "${VALID_YAML}"
+    [ "${status}" -ne 0 ]
+    run bash -c "source '${CONFIG_SH}'; config::load '${VALID_YAML}'; config::validate && config::get_team_id"
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "${UUID_TEAM}" ]
+}
+
+@test "FR-005: identity resolves from the operator-local file when no env is set" {
+    local opfile="${TEST_TMP}/.specify/extensions/linear/linear-operator.local.yml"
+    mkdir -p "$(dirname "${opfile}")"
+    write_operator_local "${opfile}" "44444444-4444-4444-4444-444444444444"
+    run bash -c "cd '${TEST_TMP}'; unset LINEAR_OPERATOR_USER_ID; source '${CONFIG_SH}'; config::load '${VALID_YAML}'; config::resolve_operator_user_id"
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "44444444-4444-4444-4444-444444444444" ]
+}
+
+@test "FR-005: LINEAR_OPERATOR_USER_ID env wins over the operator-local file" {
+    local opfile="${TEST_TMP}/.specify/extensions/linear/linear-operator.local.yml"
+    mkdir -p "$(dirname "${opfile}")"
+    write_operator_local "${opfile}" "44444444-4444-4444-4444-444444444444"
+    run bash -c "cd '${TEST_TMP}'; export LINEAR_OPERATOR_USER_ID='55555555-5555-5555-5555-555555555555'; source '${CONFIG_SH}'; config::load '${VALID_YAML}'; config::resolve_operator_user_id"
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "55555555-5555-5555-5555-555555555555" ]
+}
+
+@test "FR-011: no env and no local file resolves to empty (no halt)" {
+    run bash -c "cd '${TEST_TMP}'; unset LINEAR_OPERATOR_USER_ID; source '${CONFIG_SH}'; config::load '${VALID_YAML}'; config::resolve_operator_user_id; echo \"status=\$?\""
+    [ "${status}" -eq 0 ]
+    [[ "${output}" == *"status=0"* ]]
+    # First line (the resolved id) must be empty.
+    [ "$(printf '%s' "${output}" | head -n1)" = "" ]
+}
+
+@test "FR-005: resolve_operator_user_id NEVER reads identity from the committed config" {
+    # Plant a committed-store value directly in CONFIG_VALUES (the legacy
+    # leak shape) but supply NO env and an EMPTY operator-local store. The
+    # resolver must return empty — it reads only env + CONFIG_OPERATOR_VALUES,
+    # never CONFIG_VALUES (which is where the committed config lands).
+    run bash -c "
+        unset LINEAR_OPERATOR_USER_ID
+        source '${CONFIG_SH}'
+        config::load '${VALID_YAML}'
+        # Simulate a stale committed-config identity key.
+        CONFIG_VALUES[linear.operator.user_id]='deadbeef-dead-dead-dead-deaddeaddead'
+        config::resolve_operator_user_id
+    "
+    [ "${status}" -eq 0 ]
+    [ "$(printf '%s' "${output}" | head -n1)" = "" ]
+}
+
+@test "FR-007: legacy operator.* migrates to local file with exactly one notice" {
+    local work="${TEST_TMP}/migrate"
+    mkdir -p "${work}/.specify/extensions/linear"
+    local cfg="${work}/.specify/extensions/linear/linear-config.yml"
+    local opfile="${work}/.specify/extensions/linear/linear-operator.local.yml"
+    write_valid_config "${cfg}"
+    # Insert a legacy operator block under linear:.
+    awk '/^  project:/ && !done { print "  operator:"; print "    user_id: \"33333333-3333-3333-3333-333333333333\""; print "    name: \"Legacy\""; print "    email: \"legacy@example.com\""; done=1 } { print }' \
+        "${cfg}" > "${cfg}.tmp" && mv "${cfg}.tmp" "${cfg}"
+
+    run bash -c "cd '${work}'; unset LINEAR_OPERATOR_USER_ID; source '${CONFIG_SH}'; config::load '.specify/extensions/linear/linear-config.yml' 2>&1; echo '---'; config::resolve_operator_user_id"
+    [ "${status}" -eq 0 ]
+    # Exactly one migration notice.
+    [ "$(printf '%s\n' "${output}" | grep -c 'migrated operator identity')" -eq 1 ]
+    # Identity is resolvable (moved to local file).
+    [[ "${output}" == *"33333333-3333-3333-3333-333333333333"* ]]
+    # The committed file no longer carries an operator block.
+    run grep -q 'operator:' "${cfg}"
+    [ "${status}" -ne 0 ]
+    # The local file now exists.
+    [ -f "${opfile}" ]
+}
+
+@test "FR-007: migration is idempotent — second load emits no notice" {
+    local work="${TEST_TMP}/migrate2"
+    mkdir -p "${work}/.specify/extensions/linear"
+    local cfg="${work}/.specify/extensions/linear/linear-config.yml"
+    write_valid_config "${cfg}"
+    awk '/^  project:/ && !done { print "  operator:"; print "    user_id: \"33333333-3333-3333-3333-333333333333\""; done=1 } { print }' \
+        "${cfg}" > "${cfg}.tmp" && mv "${cfg}.tmp" "${cfg}"
+
+    # First load migrates (one notice).
+    run bash -c "cd '${work}'; source '${CONFIG_SH}'; config::load '.specify/extensions/linear/linear-config.yml' 2>&1"
+    [ "$(printf '%s\n' "${output}" | grep -c 'migrated operator identity')" -eq 1 ]
+    # Second load (fresh process) must emit NO migration notice.
+    run bash -c "cd '${work}'; source '${CONFIG_SH}'; config::load '.specify/extensions/linear/linear-config.yml' 2>&1"
+    [ "$(printf '%s\n' "${output}" | grep -c 'migrated operator identity')" -eq 0 ]
+}
+
+@test "edge: legacy operator.* + pre-existing local file — local file wins, no clobber" {
+    local work="${TEST_TMP}/migrate3"
+    mkdir -p "${work}/.specify/extensions/linear"
+    local cfg="${work}/.specify/extensions/linear/linear-config.yml"
+    local opfile="${work}/.specify/extensions/linear/linear-operator.local.yml"
+    write_valid_config "${cfg}"
+    awk '/^  project:/ && !done { print "  operator:"; print "    user_id: \"33333333-3333-3333-3333-333333333333\""; done=1 } { print }' \
+        "${cfg}" > "${cfg}.tmp" && mv "${cfg}.tmp" "${cfg}"
+    # Pre-existing local file with a DIFFERENT (authoritative) identity.
+    write_operator_local "${opfile}" "77777777-7777-7777-7777-777777777777"
+
+    run bash -c "cd '${work}'; unset LINEAR_OPERATOR_USER_ID; source '${CONFIG_SH}'; config::load '.specify/extensions/linear/linear-config.yml' 2>&1; echo '---'; config::resolve_operator_user_id"
+    [ "${status}" -eq 0 ]
+    # The pre-existing local identity wins; legacy value is dropped.
+    [[ "${output}" == *"77777777-7777-7777-7777-777777777777"* ]]
+    [[ "${output}" != *"33333333-3333-3333-3333-333333333333"* ]]
+    # Local file not clobbered.
+    run grep -q '77777777-7777-7777-7777-777777777777' "${opfile}"
+    [ "${status}" -eq 0 ]
+}
+
+@test "edge: malformed operator-local file surfaces a clear diagnostic (no silent failure)" {
+    local work="${TEST_TMP}/malformed"
+    mkdir -p "${work}/.specify/extensions/linear"
+    local cfg="${work}/.specify/extensions/linear/linear-config.yml"
+    write_valid_config "${cfg}"
+    # Tab-indented operator-local file → the loader rejects tabs.
+    printf 'operator:\n\tuser_id: "x"\n' > "${work}/.specify/extensions/linear/linear-operator.local.yml"
+    run bash -c "cd '${work}'; source '${CONFIG_SH}'; config::load '.specify/extensions/linear/linear-config.yml'"
+    [ "${status}" -eq 2 ]
+    [[ "${output}" == *"tab character"* ]]
+}

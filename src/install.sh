@@ -68,6 +68,10 @@ source "${SCRIPT_DIR}/graphql.sh"
 # populated; `speckit.linear.seed` later fills `workflow_state_uuids`.
 readonly INSTALL_CONFIG_PATH=".specify/extensions/linear/linear-config.yml"
 readonly INSTALL_CONFIG_DIR=".specify/extensions/linear"
+# Operator-local identity file (spec 004). Gitignored; holds the per-
+# operator user_id/name/email so the committed config carries no
+# identity (FR-002, FR-003).
+readonly INSTALL_OPERATOR_LOCAL_PATH=".specify/extensions/linear/linear-operator.local.yml"
 readonly INSTALL_EXTENSIONS_YML=".specify/extensions.yml"
 # Resolved at runtime by install::check_repo_layout (FR-033). NOT a readonly
 # constant: hardcoding `.git/hooks` is wrong in a linked git worktree, where
@@ -1272,7 +1276,9 @@ install::write_config() {
             "linear.team.id" "$team_uuid"
         install::_substitute_uuid_placeholder "$INSTALL_CONFIG_PATH" \
             "linear.project.id" "$project_uuid"
-        install::_write_operator_block "$INSTALL_CONFIG_PATH"
+        # spec 004 — identity is NOT written into the committed config;
+        # it goes to the gitignored operator-local file (see
+        # install::_write_operator_local_file, called from install::main).
         install::_write_workspace_block "$INSTALL_CONFIG_PATH"
         install::_write_team_block "$INSTALL_CONFIG_PATH"
         install::_write_project_block "$INSTALL_CONFIG_PATH"
@@ -1289,7 +1295,9 @@ hint: re-run \`specify extension add linear\` (or pass --dev with a checkout of 
         "linear.team.id" "$team_uuid"
     install::_substitute_uuid_placeholder "$INSTALL_CONFIG_PATH" \
         "linear.project.id" "$project_uuid"
-    install::_write_operator_block "$INSTALL_CONFIG_PATH"
+    # spec 004 — identity goes to the gitignored operator-local file, not
+    # the committed config (FR-001, FR-002). See
+    # install::_write_operator_local_file (called from install::main).
     install::_write_workspace_block "$INSTALL_CONFIG_PATH"
     # T233/T239 — spec 002: populate the linear.team and linear.project
     # informational fields (key, name) when the discovery flow resolved
@@ -1410,97 +1418,72 @@ install::_substitute_yaml_string_field() {
     mv "$tmp" "$file"
 }
 
-# install::_write_operator_block <file>
+# install::_write_operator_local_file  (spec 004, FR-002 / FR-003)
 #
-# Substitute the three operator-identity fields (user_id, name, email)
-# captured by install::resolve_operator into the `operator:` block of
-# the linear-config.yml at <file>. Per FR-034 we only overwrite the
-# placeholder values that the template ships with — a re-install must
-# never silently mutate an operator-edited config.
+# Scaffold the gitignored operator-local identity file
+# (INSTALL_OPERATOR_LOCAL_PATH) from the identity captured by
+# install::resolve_operator. Identity NEVER lands in the committed
+# linear-config.yml.
 #
-# The function is a no-op when INSTALL_OPERATOR_USER_ID is empty (the
-# resolver was skipped or returned no data) — in that case
-# config::get_operator_user_id will later report absence and the
-# reconciler will degrade gracefully per FR-034.
-install::_write_operator_block() {
-    local file="$1"
-
-    # T232 / FR-048 — prefer the spec-002 session-scoped viewer state
-    # when present (single-fire single-source-of-truth). Fall back to
-    # the v0.1.0 INSTALL_OPERATOR_* globals to keep the legacy path
-    # bit-for-bit identical when --team / --project / --auto-create
-    # short-circuit the discovery flow.
+# Idempotency: if the operator-local file already exists, it is the
+# operator's authoritative copy — we do NOT clobber it (a re-install
+# must not silently overwrite an operator-edited identity). When no
+# identity resolved (INSTALL_*_USER_ID empty), this is a no-op and the
+# reconciler degrades gracefully per FR-011.
+install::_write_operator_local_file() {
+    # Prefer the spec-002 session-scoped viewer state; fall back to the
+    # v0.1.0 INSTALL_OPERATOR_* globals (legacy --team/--project path).
     local user_id="${INSTALL_SESSION_VIEWER_ID:-$INSTALL_OPERATOR_USER_ID}"
     local user_name="${INSTALL_SESSION_VIEWER_NAME:-$INSTALL_OPERATOR_NAME}"
     local user_email="${INSTALL_SESSION_VIEWER_EMAIL:-$INSTALL_OPERATOR_EMAIL}"
 
     if [[ -z "$user_id" ]]; then
+        install::_log_info "no operator identity resolved; skipping operator-local file (issues will be created unassigned until you set one — FR-011)"
         return 0
     fi
 
-    install::_substitute_operator_field "$file" "user_id" \
-        "\"${user_id}\"" \
-        '"00000000-0000-0000-0000-000000000000"'
-    install::_substitute_operator_field "$file" "name" \
-        "\"${user_name}\"" \
-        '"Ash Brener"'
-    install::_substitute_operator_field "$file" "email" \
-        "\"${user_email}\"" \
-        '"ash@example.com"'
+    if [[ -e "$INSTALL_OPERATOR_LOCAL_PATH" ]]; then
+        install::_log_info "operator-local identity file already present; preserving it (${INSTALL_OPERATOR_LOCAL_PATH})"
+        return 0
+    fi
+
+    mkdir -p "$INSTALL_CONFIG_DIR"
+    {
+        printf '# spec-kit-linear — operator-local identity (NEVER COMMIT).\n'
+        printf '# Gitignored per FR-003. Holds the per-operator Linear identity so\n'
+        printf '# the committed linear-config.yml carries no personal data (FR-002).\n'
+        printf '# Resolution cascade: LINEAR_OPERATOR_USER_ID env -> this file -> prompt.\n'
+        printf 'schema_version: 1\n'
+        printf 'operator:\n'
+        printf '  user_id: "%s"\n' "$user_id"
+        printf '  name: "%s"\n' "$user_name"
+        printf '  email: "%s"\n' "$user_email"
+    } > "$INSTALL_OPERATOR_LOCAL_PATH"
+    install::_log_info "wrote operator-local identity to ${INSTALL_OPERATOR_LOCAL_PATH}"
 }
 
-# install::_substitute_operator_field <file> <field> <new_quoted> <placeholder_quoted>
+# install::_ensure_operator_local_gitignored  (spec 004, FR-003)
 #
-# Replace the first occurrence of `<field>: <placeholder_quoted>` inside
-# the `operator:` block with `<field>: <new_quoted>`. Idempotent — once
-# the placeholder is gone, the function is a no-op so re-running install
-# against an operator-edited config preserves the operator's values.
-install::_substitute_operator_field() {
-    local file="$1"
-    local field="$2"
-    local new_quoted="$3"
-    local placeholder_quoted="$4"
-
-    if [[ ! -f "$file" ]]; then
+# Guarantee `.specify/extensions/linear/*.local.yml` is in `.gitignore`,
+# adding the entry if absent (never silently skip — US2 scenario 2).
+# Idempotent. Mirrors install::_ensure_dotenv_gitignored.
+install::_ensure_operator_local_gitignored() {
+    local entry=".specify/extensions/linear/*.local.yml"
+    if [[ ! -f .gitignore ]]; then
+        printf '%s\n' "$entry" > .gitignore
+        install::_log_info "created .gitignore with operator-local entry"
         return 0
     fi
-
-    local tmp
-    tmp="$(mktemp -t spec-kit-linear-config.XXXXXX)"
-    awk -v field="$field" \
-        -v placeholder="$placeholder_quoted" \
-        -v replacement="$new_quoted" '
-        BEGIN { in_block = 0; replaced = 0 }
-        {
-            ltrim = $0
-            sub(/^[[:space:]]+/, "", ltrim)
-            if (ltrim == "operator:") {
-                in_block = 1
-                print
-                next
-            }
-            # Sibling block opener at the same indent level closes the
-            # operator: scope. Heuristic: a key line at the two-space
-            # indent (the indent of operator: itself) that is not a
-            # nested child.
-            if (in_block && $0 ~ /^  [a-zA-Z_].*:[[:space:]]*$/) {
-                in_block = 0
-            }
-            if (in_block && replaced == 0) {
-                # Anchor on "    <field>:" so unrelated keys with
-                # similar names dont match.
-                pattern = "^[[:space:]]+" field ":[[:space:]]*" placeholder
-                if (match($0, pattern)) {
-                    # Replace just the placeholder; leave indent +
-                    # trailing comment intact.
-                    sub(placeholder, replacement)
-                    replaced = 1
-                }
-            }
-            print
-        }
-    ' "$file" >"$tmp"
-    mv "$tmp" "$file"
+    # Match the exact glob entry (anchored). A bare `*.local.yml` higher
+    # up would also cover it, but we assert the explicit, documented entry.
+    if grep -qxF "$entry" .gitignore; then
+        return 0
+    fi
+    if [[ -s .gitignore ]] && [[ "$(tail -c1 .gitignore | wc -l)" -eq 0 ]]; then
+        printf '\n' >> .gitignore
+    fi
+    printf '%s\n' "$entry" >> .gitignore
+    install::_log_info "added operator-local entry to .gitignore (${entry})"
 }
 
 # install::_substitute_uuid_placeholder <file> <key> <uuid>
@@ -3394,7 +3377,18 @@ install::main() {
     fi
 
     install::write_config "$team_uuid" "$project_uuid"
-    summary::add "created" "linear-config.yml at ${INSTALL_CONFIG_PATH}"
+    summary::add "created" "linear-config.yml at ${INSTALL_CONFIG_PATH} (committed; no identity)"
+
+    # ---- spec 004: operator-local identity split (FR-002 / FR-003) --------
+    # Ensure the operator-local file is gitignored BEFORE we write it, so a
+    # later `git add -A` can never stage the identity even if the write
+    # races a commit. Then scaffold the file from the resolved identity.
+    install::_ensure_operator_local_gitignored
+    summary::add "updated" "operator-local file gitignored (.specify/extensions/linear/*.local.yml)"
+    install::_write_operator_local_file
+    if [[ -e "$INSTALL_OPERATOR_LOCAL_PATH" ]]; then
+        summary::add "created" "operator-local identity at ${INSTALL_OPERATOR_LOCAL_PATH} (gitignored)"
+    fi
 
     # ---- Step 3: register after_* hooks (T042 / FR-031) --------------------
     install::register_after_hooks

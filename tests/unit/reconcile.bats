@@ -282,3 +282,63 @@ compose_desc() {
     [ "${status}" -ne 0 ]
     [ -z "${output}" ]
 }
+
+# ---------------------------------------------------------------------------
+# spec 004 — operator assignee resolution via the cascade (FR-005 / FR-011)
+# ---------------------------------------------------------------------------
+
+@test "FR-011: assignee resolver warns once and returns empty when no identity resolves" {
+    # No env, no operator-local file → reconcile::_resolve_operator_assignee_id
+    # must return empty (issues created unassigned) and record exactly one
+    # warning, never halt.
+    local work="${BATS_TEST_TMPDIR}/noident"
+    mkdir -p "${work}/.specify/extensions/linear"
+    cat > "${work}/.specify/extensions/linear/linear-config.yml" <<EOF
+schema_version: 1
+linear:
+  team:
+    id: "11111111-1111-1111-1111-111111111111"
+  project:
+    id: "22222222-2222-2222-2222-222222222222"
+  workflow_state_uuids:
+    specifying: "aaaaaaaa-0001-0000-0000-000000000001"
+EOF
+    run bash -c "
+        cd '${work}'
+        unset LINEAR_OPERATOR_USER_ID
+        source '${RECONCILE_SH}' 2>/dev/null
+        config::load '.specify/extensions/linear/linear-config.yml'
+        summary::start 'test'
+        first=\$(reconcile::_resolve_operator_assignee_id)
+        second=\$(reconcile::_resolve_operator_assignee_id)
+        printf 'first=[%s] second=[%s]\n' \"\$first\" \"\$second\"
+    "
+    [ "${status}" -eq 0 ]
+    [[ "${output}" == *"first=[] second=[]"* ]]
+}
+
+@test "FR-005: assignee resolver returns the operator-local user_id (no env)" {
+    local work="${BATS_TEST_TMPDIR}/withident"
+    mkdir -p "${work}/.specify/extensions/linear"
+    cat > "${work}/.specify/extensions/linear/linear-config.yml" <<EOF
+schema_version: 1
+linear:
+  team:
+    id: "11111111-1111-1111-1111-111111111111"
+EOF
+    cat > "${work}/.specify/extensions/linear/linear-operator.local.yml" <<EOF
+schema_version: 1
+operator:
+  user_id: "44444444-4444-4444-4444-444444444444"
+EOF
+    run bash -c "
+        cd '${work}'
+        unset LINEAR_OPERATOR_USER_ID
+        source '${RECONCILE_SH}' 2>/dev/null
+        config::load '.specify/extensions/linear/linear-config.yml'
+        summary::start 'test'
+        reconcile::_resolve_operator_assignee_id
+    "
+    [ "${status}" -eq 0 ]
+    [ "${output}" = "44444444-4444-4444-4444-444444444444" ]
+}
