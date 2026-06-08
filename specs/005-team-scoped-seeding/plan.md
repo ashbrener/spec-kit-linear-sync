@@ -199,7 +199,7 @@ when a create is denied.
 | `src/config.sh` | `config::get_seed_scope` (new) | echo `linear.seed.scope` if present + valid; else the default `team`; halt on an invalid value (Principle VIII) |
 | `src/graphql.sh` | `graphql::_classify_error` (new, internal) | map an HTTP status + body to one of `ok`/`permission`/`limit`/`transport`/`graphql` |
 | `src/graphql.sh` | `graphql::mutate_capture` (new, public) | non-fatal mutate; prints the classification envelope; key stays in-module |
-| `src/seed.sh` | CLI | add `--scope workspace|team` flag + usage text |
+| `src/seed.sh` | CLI | add `--scope workspace`/`team` flag + usage text |
 | `src/seed.sh` | `seed::resolve_scope` (new) | precedence: `--scope` flag → `config::get_seed_scope` → default `team` |
 | `src/seed.sh` | `seed::create_label` | accept a scope arg; in `team` scope add `teamId` to `IssueLabelCreateInput` (FR-001); route through `mutate_capture`; classify permission/limit |
 | `src/seed.sh` | `seed::create_workflow_state` | route through `mutate_capture`; classify permission/limit (workflow states are already team-scoped) |
