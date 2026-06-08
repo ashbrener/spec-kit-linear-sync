@@ -333,6 +333,8 @@ hint: copy config-template.yml to ${path} and run \`/spec-kit-linear-install\` t
 # degrades gracefully per FR-011). A present-but-unreadable or malformed
 # file surfaces the SAME actionable diagnostic the committed loader emits
 # (Principle VIII — no silent failure).
+# shellcheck disable=SC2120  # the optional [path] arg is intentional (exercised
+# by unit tests); no runtime caller passes one, which is fine.
 config::_load_operator_file() {
     local path="${1:-${CONFIG_OPERATOR_LOCAL_PATH_DEFAULT}}"
 
