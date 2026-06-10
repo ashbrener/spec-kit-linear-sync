@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-06-10 — Configurable artifact mapping (#17) + lifecycle fixes
+
+Headlines the operator-configurable spec→Linear mapping (spec 007, resolving the
+long-standing #17 design question) plus a lifecycle-inference fix (#61). The
+default mapping is unchanged and the command surface is the same; `extension.id`
+stays `linear`. The configurable projection was validated end-to-end against a
+real Linear workspace (created the `Initiative > Project > Issue > sub-issue`
+hierarchy and re-ran zero-churn).
+
 ### Configurable artifact mapping — spec 007
 
 Resolves the #17 design question ("should a spec become a Project or an Issue?")
@@ -45,6 +54,22 @@ unchanged (no file rewrite, no config-version bump).
   (never a silent partial). `extension.id` stays `linear`; the command surface is
   unchanged. The configurable projection is new — validate on a test workspace
   before relying on it in production.
+- **Live-dogfood fixes** found while validating the #17 projection against a real
+  Linear workspace: `--dry-run` no longer errors when previewing the mapped path
+  (placeholder ids were leaking into real queries); long spec bodies go in the
+  Project/Initiative `content` field (Linear caps `description` at 255 chars); and
+  the spec→Project nesting uses the correct `initiativeToProjectCreate` junction
+  mutation.
+
+### Lifecycle fix
+
+- **Linear issues no longer stick at "in-progress" (#61).** The reconciler now
+  reads the spec's real branch from `plan.md` (`**Branch**:`) for the PR-state
+  lookup instead of guessing from the directory name. When the two differ (a spec
+  dir `014-*` whose work merged on branch `015-*`), the merged PR is now detected
+  and the issue moves to merged, rather than falling back to artifact inference
+  and being overwritten to in-progress every sync. Falls back to the dir-derived
+  name when `plan.md` has no branch line (no change when they already match).
 
 ## [0.3.0] — 2026-06-08 — Config/identity split, team-scoped seeding, faithful projection
 
