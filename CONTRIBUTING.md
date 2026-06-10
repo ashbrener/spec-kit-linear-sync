@@ -109,3 +109,23 @@ Before merging, a maintainer checks:
 - [ ] No new runtime dependency introduced (or a constitution amendment is attached).
 - [ ] Commit messages follow the conventions above; no AI-attribution trailers.
 - [ ] FR numbers referenced in the PR body actually exist in the current spec.
+
+## Releasing & updating the community catalog
+
+The extension is listed in the **spec-kit community catalog**
+(`github/spec-kit` → `extensions/catalog.community.json` + `docs/community/extensions.md`).
+When cutting a release that should be reflected there (a new version, changed
+URLs, etc.):
+
+1. Tag + publish the release in this repo (so the `download_url` archive exists).
+2. **Update the catalog via the upstream extension submission issue, not a
+   direct PR.** Open a `github/spec-kit` issue using the **Extension submission**
+   template (`.github/ISSUE_TEMPLATE/extension_submission.yml`) and let the
+   maintainers apply the catalog change. This is the process the spec-kit
+   maintainer (@mnriem) asked us to follow going forward (PR #2893, merged
+   2026-06-09: "Note going forward please use an extension submission issue").
+   Direct catalog PRs (our #2749 / #2750 / #2835 / #2893) are deprecated for
+   this repo.
+3. The catalog `id` stays `linear` (never rename — the consumer command surface
+   depends on it); only `version`, `download_url`, and the `*-linear-sync` URLs
+   change between releases.
