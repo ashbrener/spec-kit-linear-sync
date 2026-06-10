@@ -572,3 +572,51 @@ EOF
     [ "$status" -eq 0 ]
     [ -z "$output" ]
 }
+
+# ---------------------------------------------------------------------------
+# parser::plan_branch (issue #61 — use plan.md's real branch, not the dir name)
+# ---------------------------------------------------------------------------
+
+@test "plan_branch extracts the branch from plan.md (differs from dir name)" {
+    local d="${BATS_TEST_TMPDIR}/014-client-credentials-auth"
+    mkdir -p "$d"
+    printf '%s\n' '**Branch**: `015-add-client-credentials-auth` | **Date**: 2026-06-09 | **Spec**: [spec.md](./spec.md)' > "$d/plan.md"
+    run parser::plan_branch "$d"
+    [ "$status" -eq 0 ]
+    [ "$output" = "015-add-client-credentials-auth" ]
+}
+
+@test "plan_branch tolerates a trailing slash on the spec dir" {
+    local d="${BATS_TEST_TMPDIR}/007-x"
+    mkdir -p "$d"
+    printf '%s\n' '**Branch**: `007-x`' > "$d/plan.md"
+    run parser::plan_branch "${d}/"
+    [ "$status" -eq 0 ]
+    [ "$output" = "007-x" ]
+}
+
+@test "plan_branch returns empty for the unfilled template placeholder" {
+    local d="${BATS_TEST_TMPDIR}/008-y"
+    mkdir -p "$d"
+    printf '%s\n' '**Branch**: `[###-feature-name]`' > "$d/plan.md"
+    run parser::plan_branch "$d"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "plan_branch returns empty when plan.md is absent" {
+    local d="${BATS_TEST_TMPDIR}/009-no-plan"
+    mkdir -p "$d"
+    run parser::plan_branch "$d"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
+
+@test "plan_branch returns empty when plan.md has no Branch line" {
+    local d="${BATS_TEST_TMPDIR}/010-z"
+    mkdir -p "$d"
+    printf '%s\n' '# Implementation Plan' 'Some text, no branch.' > "$d/plan.md"
+    run parser::plan_branch "$d"
+    [ "$status" -eq 0 ]
+    [ -z "$output" ]
+}
