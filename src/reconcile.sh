@@ -2447,9 +2447,11 @@ reconcile::process_spec_mapped() {
     local mapped_existing_proj
     mapped_existing_proj="$(reconcile::query_project_by_marker "speckit-spec:${feature_number}" "$team_id" 2>/dev/null)" || mapped_existing_proj=""
     if [[ -n "$mapped_existing_proj" && "$mapped_existing_proj" != "null" ]]; then
-        local mapped_pid mapped_disk_phase mapped_pr_hint mapped_verdict
+        local mapped_pid mapped_disk_phase mapped_pr_hint mapped_verdict mapped_branch
         mapped_pid="$(printf '%s' "$mapped_existing_proj" | jq -r '.id // ""')"
-        mapped_pr_hint="$(reconcile::pr_state_hint "$(git_helpers::pr_state "${feature_number}-${short_name}" 2>/dev/null || true)")"
+        mapped_branch="$(parser::plan_branch "$spec_dir")"
+        [[ -n "$mapped_branch" ]] || mapped_branch="${feature_number}-${short_name}"
+        mapped_pr_hint="$(reconcile::pr_state_hint "$(git_helpers::pr_state "$mapped_branch" 2>/dev/null || true)")"
         mapped_disk_phase="$(parser::lifecycle_phase "$spec_dir" "$mapped_pr_hint" 2>/dev/null || true)"
         if [[ -n "$mapped_pid" ]]; then
             mapped_verdict="$(reconcile::_mapped_compute_drift "$mapped_pid" "$spec_dir" "$feature_number" "$mapped_disk_phase")"
@@ -3981,8 +3983,17 @@ reconcile::process_spec() {
         return 0
     fi
 
-    # Feature branch is the canonical `<NNN>-<short-name>`.
-    local feature_branch="${feature_number}-${short_name}"
+    # Feature branch: prefer the ACTUAL branch declared in plan.md, falling
+    # back to the canonical `<NNN>-<short-name>` from the directory name. The
+    # plan's branch can differ from the dir name (e.g. a spec authored under
+    # 014-* whose work landed on 015-*); using the real branch lets the
+    # PR-state lookup find the merged PR instead of artifact-inferring a stuck
+    # `implementing` (issue #61).
+    local feature_branch
+    feature_branch="$(parser::plan_branch "$spec_dir")"
+    if [[ -z "$feature_branch" ]]; then
+        feature_branch="${feature_number}-${short_name}"
+    fi
 
     # --- 4a. Write authority (spec 003 / FR-051 / Principle IV) -------
     # The v1.0.0 FR-025 branch-gate is REMOVED (T324). Every worktree now

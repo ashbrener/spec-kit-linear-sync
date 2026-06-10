@@ -553,3 +553,38 @@ parser::clarify_session_bullets() {
         in_section && in_session && /^- / { print }
     ' "$spec_md"
 }
+
+# parser::plan_branch <spec_dir>
+#
+# Echo the feature branch declared in the spec's plan.md `**Branch**:` line
+# (the first backtick-quoted value), or nothing when plan.md is absent, has no
+# Branch line, or still carries the unfilled `[###-feature-name]` placeholder.
+#
+# spec-kit's plan.md records the ACTUAL branch, which can differ from the spec
+# directory name (e.g. a spec authored under `014-*` whose work landed on branch
+# `015-*`). The reconciler uses this for the PR-state lookup so a merged spec on
+# a renamed branch is detected as merged instead of being stuck at `implementing`
+# by artifact inference (issue #61). Pure — reads one file, mutates nothing.
+parser::plan_branch() {
+    local plan_md="${1%/}/plan.md"
+    [[ -f "$plan_md" ]] || return 0
+
+    local line
+    line="$(grep -m1 -E '^\*\*Branch\*\*:' "$plan_md" 2>/dev/null || true)"
+    [[ -n "$line" ]] || return 0
+
+    # Require a backtick pair, then take the first quoted token after the label.
+    case "$line" in
+        *'`'*'`'*) : ;;
+        *) return 0 ;;
+    esac
+    local br="${line#*\`}"
+    br="${br%%\`*}"
+    br="$(printf '%s' "$br" | tr -d '[:space:]')"
+
+    # Ignore empties and the unfilled template placeholder `[###-feature-name]`.
+    case "$br" in
+        ''|'['*) return 0 ;;
+    esac
+    printf '%s' "$br"
+}
