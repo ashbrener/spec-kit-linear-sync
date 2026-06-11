@@ -365,6 +365,7 @@ hint: copy config-template.yml to ${path} and run \`/spec-kit-linear-install\` t
     # preserving the byte-for-byte default-OFF guarantee). Absent file is
     # a graceful no-op even when enabled.
     if config::attribution_enabled; then
+        # shellcheck disable=SC2119  # intentional: default path arg via getter.
         config::load_authors_override
     fi
 }
@@ -660,6 +661,8 @@ config::authors_file_path() {
 # email/handle. Absent file ⇒ graceful no-op (dynamic roster still
 # resolves members). Email keys contain dots, so we strip the known
 # `.handle` / `.linear_user_id` suffix rather than splitting on dots.
+# shellcheck disable=SC2120  # the optional [path] arg is intentional
+# (exercised by unit tests); no runtime caller passes one, which is fine.
 config::load_authors_override() {
     local path="${1:-}"
     [[ -n "$path" ]] || path="$(config::authors_file_path)"
