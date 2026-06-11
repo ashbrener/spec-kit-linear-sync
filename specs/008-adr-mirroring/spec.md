@@ -8,6 +8,21 @@
 
 **Input**: User description: "Mirror ADRs (architecture/decision records) from spec-kit specs into Linear, as the Linear sibling of the spec-kit-jira ADR-mirroring feature — parity-locked at the user-visible level. Today the bridge mirrors a spec's `## Clarifications` sessions as at-most-once comments on the spec's Linear Issue; it does NOT capture the formal ADRs in each spec's `research.md` (the Decision / Rationale / Alternatives blocks). Option A: mirror each ADR as one idempotent comment on the spec's Linear Issue, reusing the clarify-comment machinery. Keep the user-visible shape identical to the Jira sibling for cross-sink parity. Out of scope: Linear Documents as a richer doc-home (Option B); a docs/adr/ corpus as an alternate source; bidirectional sync."
 
+## Clarifications
+
+### Session 2026-06-11
+
+- Q: ADR source — `research.md` only, or also a `docs/adr/` corpus? → A:
+  `research.md` only — the native structured source spec-kit already produces;
+  keeps a single grammar and parity with the Jira sibling. A `docs/adr/`
+  convention stays out of scope (revisit only if a real consumer need appears).
+- Q: How is each ADR keyed for idempotent matching when a `research.md` block
+  has no explicit `## D<N>`/`## R<N>` id heading? → A: Key by the explicit
+  heading id when present, else by a stable slug derived from the decision's
+  title/first line; detect changes by comparing content (update the one existing
+  comment in place). Survives content edits and reordering; un-headed blocks are
+  still mirrored via their title slug.
+
 ## User Scenarios & Testing *(mandatory)*
 
 ### User Story 1 - Decisions show up on the spec's Linear Issue (Priority: P1)
@@ -115,21 +130,29 @@ back-reference, one-comment-per-decision placement) matches.
   land on the freshly-created Issue.
 - Two decisions share a title but differ in id — each is mirrored as its own
   comment, distinguished by id, with no collision.
+- Two **un-headed** decisions share the same title (so the same title slug) — a
+  deterministic positional suffix disambiguates their keys so each gets its own
+  stable comment rather than one overwriting the other.
 
 ## Requirements *(mandatory)*
 
 ### Functional Requirements
 
 - **FR-001**: The system MUST read each spec's architecture/decision records from
-  that spec's `research.md` — specifically its structured
+  that spec's `research.md` ONLY — specifically its structured
   `Decision / Rationale / Alternatives` blocks — and treat each block as one ADR.
+  A `docs/adr/` corpus is NOT a source in this feature (clarified 2026-06-11).
 - **FR-002**: For each ADR, the system MUST mirror it as a single comment on that
   spec's Linear Issue, rendered in an ADR layout that includes the decision id,
   title, status, decision, rationale, alternatives, and a back-reference to the
   source location in the repo.
 - **FR-003**: Each ADR comment MUST carry a stable, hidden idempotency marker
-  derived from the spec and decision identity (a spec/decision key) so that
-  re-runs locate the existing comment rather than posting a new one.
+  derived from the spec and decision identity, where the decision key is the
+  ADR's explicit heading id (`D<N>`/`R<N>`) when present, else a stable slug
+  derived from the decision's title/first line. Re-runs MUST locate the existing
+  comment by this key (not by content), so the key survives content edits and
+  reordering; change is detected by comparing content (see FR-005). An un-headed
+  decision block MUST still be mirrored, keyed by its title slug.
 - **FR-004**: A reconcile against an unchanged corpus MUST create zero ADR
   comments and edit zero ADR comments (idempotent, zero-churn — the same
   at-most-once guarantee the clarify-session comments provide).
@@ -189,20 +212,18 @@ back-reference, one-comment-per-decision placement) matches.
 
 ## Assumptions
 
-The following working defaults make the spec complete with no unresolved
-clarification markers. The first is the one genuine fork the operator asked to
-pin during `/speckit-clarify`.
+The following working defaults make the spec complete; the two forks raised in
+`/speckit-clarify` (session 2026-06-11) are now resolved and reflected below.
 
-- **ADR source = `research.md` (the clarify candidate).** The default and
-  recommended source is each spec's `research.md` `Decision / Rationale /
-  Alternatives` blocks — the structured ADRs spec-kit already produces. The open
-  question to confirm in `/speckit-clarify` is whether to ALSO support a
-  `docs/adr/NNNN-*.md` convention as an alternate/additional source. This spec
-  assumes **`research.md` only** unless clarify decides to broaden it.
-- **Decision id + title.** The ADR id and title are derived from the
-  `research.md` decision-block heading (an `R5` / `D1`-style key and its title);
-  when a block has no explicit id, a stable id is derived from its
-  position/heading so the idempotency marker is deterministic.
+- **ADR source = `research.md` only (clarified).** The source is each spec's
+  `research.md` `Decision / Rationale / Alternatives` blocks — the structured
+  ADRs spec-kit already produces. A `docs/adr/` corpus is explicitly out of
+  scope for this feature; revisit only if a real consumer need appears.
+- **Decision id + title (clarified).** The ADR key is the explicit heading id
+  (`D<N>`/`R<N>`) when present, else a stable slug derived from the decision's
+  title/first line — so the idempotency marker is deterministic and survives
+  content edits and reordering. Un-headed blocks are still mirrored (keyed by
+  title slug), not dropped.
 - **Status default.** When a decision block states no explicit status, the
   comment shows a sensible default status (e.g. "Accepted") rather than blank.
 - **Placement.** ADR comments attach to the same spec Issue the 001 bridge
