@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### ADR / decision-record mirroring — spec 008
+
+- **Your decisions now reach the tracker.** The `Decision / Rationale /
+  Alternatives` blocks in each spec's `research.md` are mirrored as ADR comments
+  on that spec's Linear Issue — one comment per decision, in an ADR layout (id,
+  title, status, decision, rationale, alternatives, source). It rides the
+  existing `after_*` hooks; no new command, no config. Works for any spec that
+  has a `research.md`; a spec without one is a graceful no-op.
+- **Idempotent + update-in-place.** Each ADR is keyed by a hidden
+  `<!-- spec-kit-linear: adr <NNN>-<key> -->` marker (heading id `D<N>`/`R<N>`,
+  else a title slug); an unchanged corpus is zero-churn, a revised decision
+  updates its one comment in place, a new decision adds one comment. (Update-in-
+  place is Principle I — the filesystem is canonical; it is the sole behavioural
+  delta from the clarify-comment path, and the one new mutation, `commentUpdate`.)
+- **Parity** with the spec-kit-jira ADR feature: the user-visible comment shape
+  matches across both sinks. No config/schema change; `extension.id` stays
+  `linear`.
+
 ## [0.4.0] — 2026-06-10 — Configurable artifact mapping (#17) + lifecycle fixes
 
 Headlines the operator-configurable spec→Linear mapping (spec 007, resolving the

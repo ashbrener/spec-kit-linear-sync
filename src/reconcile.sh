@@ -1818,6 +1818,55 @@ reconcile::mutate_comment_create() {
     return 0
 }
 
+# reconcile::mutate_comment_update <comment_id> <body>   (spec 008)
+#   Replace an existing comment's body in place (commentUpdate). The ONLY new
+#   mutation this feature adds — the ADR path updates in place on divergence
+#   (Principle I: filesystem wins), unlike the clarify path which warns. Uses
+#   Linear's `commentUpdate(id, input:{body})` shape (the same id+input pattern
+#   as issueUpdate). Mirrors mutate_comment_create's dry-run + success-check.
+reconcile::mutate_comment_update() {
+    local comment_id="$1"
+    local body="$2"
+
+    if (( ARG_DRY_RUN == 1 )); then
+        reconcile::log "DRY-RUN commentUpdate id=${comment_id} body_len=${#body}"
+        summary::add updated "commentUpdate (dry-run)"
+        return 0
+    fi
+
+    local mutation='mutation UpdateAdrComment($id: String!, $input: CommentUpdateInput!) {
+        commentUpdate(id: $id, input: $input) {
+            success
+            comment { id }
+        }
+    }'
+    local vars
+    vars="$(jq -nc --arg id "$comment_id" --arg body "$body" \
+        '{id: $id, input: {body: $body}}')"
+
+    local response
+    if ! response="$(graphql::mutate "$mutation" "$vars")"; then
+        summary::add error "commentUpdate ${comment_id} failed (transport)"
+        reconcile::promote_exit 1
+        return 1
+    fi
+    if ! printf '%s' "$response" | jq -e '.data.commentUpdate.success == true' >/dev/null 2>&1; then
+        summary::add error "commentUpdate ${comment_id} did not return success=true"
+        reconcile::promote_exit 1
+        return 1
+    fi
+    summary::add updated "commentUpdate ${comment_id}"
+    return 0
+}
+
+# reconcile::_adr_unescape <escaped>
+#   Reverse parser::adr_records' wire escaping: `\n` → newline, `\t` → tab
+#   (only those two, leaving any literal backslash untouched). LC_ALL=C awk for
+#   GNU/BSD parity.
+reconcile::_adr_unescape() {
+    printf '%s' "$1" | LC_ALL=C awk '{ gsub(/\\t/, "\t"); gsub(/\\n/, "\n"); printf "%s", $0 }'
+}
+
 # =============================================================================
 # spec 007 — mapping-driven projection: leaf helpers (Initiative / Project).
 #
@@ -3360,6 +3409,82 @@ reconcile::sync_clarify_comments() {
     done < <(parser::clarify_sessions "$spec_md")
 }
 
+# reconcile::sync_adr_comments <spec_issue_id> <spec_dir>   (spec 008)
+#   Mirror each ADR in <spec_dir>/research.md as one at-most-once comment on the
+#   spec Issue. Near-clone of sync_clarify_comments, with the one delta that on
+#   body divergence it UPDATES IN PLACE (Principle I) instead of warning. Each
+#   comment carries a `<!-- spec-kit-linear: adr <NNN>-<key> -->` marker; the
+#   rendered body is byte-stable so an unchanged corpus is zero churn (SC-002).
+#   Graceful no-op when research.md is absent or has no ADR blocks (FR-007).
+reconcile::sync_adr_comments() {
+    local spec_issue_id="$1"
+    local spec_dir="$2"
+
+    local research_md="${spec_dir%/}/research.md"
+    [[ -f "$research_md" ]] || return 0
+
+    local nnn
+    nnn="$(parser::feature_number "$spec_dir" 2>/dev/null || true)"
+    [[ -n "$nnn" ]] || return 0
+    local source_cell
+    source_cell="\`specs/$(basename "${spec_dir%/}")/research.md\`"
+
+    local line
+    while IFS= read -r line; do
+        [[ -n "$line" ]] || continue
+        # Field-split on \037 (NOT tab): tab is IFS-whitespace and would collapse
+        # empty fields (e.g. an absent Alternatives), shifting later fields.
+        local rec="${line//$'\t'/$'\037'}"
+        local key title decision rationale alternatives source
+        IFS=$'\037' read -r key title decision rationale alternatives source <<< "$rec"
+        : "${source:-}"
+        [[ -n "$key" ]] || continue
+
+        title="$(reconcile::_adr_unescape "$title")"
+        decision="$(reconcile::_adr_unescape "$decision")"
+        rationale="$(reconcile::_adr_unescape "$rationale")"
+        alternatives="$(reconcile::_adr_unescape "$alternatives")"
+
+        local marker heading
+        marker="<!-- spec-kit-linear: adr ${nnn}-${key} -->"
+        if [[ -n "$title" ]]; then heading="**ADR ${key} — ${title}**"; else heading="**ADR ${key}**"; fi
+
+        # Render the comment body (byte-stable; omit empty sections). Status is
+        # always the default 'Accepted' (research.md has no status bullet).
+        local body
+        body="$(printf '%s\n%s\n\n| Field | Value |\n|---|---|\n| **Status** | Accepted |\n| **Source** | %s |\n' \
+            "$marker" "$heading" "$source_cell")"
+        if [[ -n "$decision" ]]; then
+            body="$(printf '%s\n**Decision**\n\n%s\n' "$body" "$decision")"
+        fi
+        if [[ -n "$rationale" ]]; then
+            body="$(printf '%s\n**Rationale**\n\n%s\n' "$body" "$rationale")"
+        fi
+        if [[ -n "$alternatives" ]]; then
+            body="$(printf '%s\n**Alternatives considered**\n\n%s\n' "$body" "$alternatives")"
+        fi
+
+        local existing
+        if ! existing="$(reconcile::query_existing_comment_body "$spec_issue_id" "$marker")"; then
+            summary::add error "could not query comments on ${spec_issue_id}"
+            continue
+        fi
+        if [[ "$existing" == "null" ]]; then
+            reconcile::mutate_comment_create "$spec_issue_id" "$body" || continue
+            continue
+        fi
+        local existing_id existing_body
+        existing_id="$(printf '%s' "$existing" | jq -r '.id')"
+        existing_body="$(printf '%s' "$existing" | jq -r '.body')"
+        if [[ "$existing_body" == "$body" ]]; then
+            reconcile::log "adr ${key} comment in sync"
+            continue
+        fi
+        # Body diverged: filesystem wins (Principle I) — update in place.
+        reconcile::mutate_comment_update "$existing_id" "$body" || continue
+    done < <(parser::adr_records "$spec_dir")
+}
+
 # =============================================================================
 # Spec 003 — drift machinery (PURE comparator + ladder).
 #
@@ -4127,6 +4252,12 @@ reconcile::process_spec() {
 
     # --- 4g. Clarify session comments (FR-008, FR-015) ----------------
     reconcile::sync_clarify_comments "$spec_issue_id" "$spec_dir" || true
+
+    # --- 4g-adr. ADR / decision-record comments (spec 008, FR-002/008) ----
+    # Mirror research.md decision blocks as at-most-once ADR comments. Guarded
+    # `|| true` so an ADR failure never blocks the rest of the per-spec
+    # reconcile; coexists with the clarify comments above (FR-008).
+    reconcile::sync_adr_comments "$spec_issue_id" "$spec_dir" || true
 
     # --- 4h. Record lifecycle for FR-002 Project Status aggregate ----
     # Every worktree that reaches here has written (the FR-025 gate is

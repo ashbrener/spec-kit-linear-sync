@@ -144,6 +144,7 @@ Spec-kit artifacts map to Linear primitives one-to-one:
 | Tasks within a phase | **Markdown checklist** in the sub-issue's description (read-only mirror per FR-006) |
 | Inter-task-phase ordering | Linear **blocking relations** between sub-issues |
 | Each `### Session YYYY-MM-DD` clarify block | **Comment** on the spec Issue, one per session |
+| Each `## D<N>`/`## R<N>` decision block in `research.md` | **ADR comment** on the spec Issue, one per decision (id, title, status, decision, rationale, alternatives, source) — idempotent and updated in place when the decision changes (spec 008) |
 | Branch / worktree / last-touched / current task | **Memory block** — a markdown table in the spec Issue's description, fully bridge-owned (rewritten every reconcile per FR-004). Operator annotations go in Linear **comments**, never the description body. |
 | Optional `[N]` Fibonacci marker on a task line | Per-phase sum → sub-issue `estimate`; spec-level sum → spec Issue `estimate` (FR-035) |
 
