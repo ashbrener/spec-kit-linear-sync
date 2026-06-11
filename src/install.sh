@@ -296,6 +296,17 @@ INSTALL VIA `specify extension add` (FR-047)
   The plain --from <repo-url> form errors with BadZipFile — use the
   archive-zip URL or --dev <local-path>.
 
+PER-DEVELOPER ONBOARDING (spec 004 — config / identity split)
+  Identity is per-person, NOT shared. The committed
+  .specify/extensions/linear/linear-config.yml is identity-free and
+  shared by everyone who clones the repo. Each developer runs
+  /speckit.linear.install ONCE on their own machine to scaffold their
+  OWN gitignored .specify/extensions/linear/linear-operator.local.yml
+  (their Linear user_id / name / email). The install guarantees the
+  *.local.yml glob is in .gitignore BEFORE writing identity, then scans
+  the tracked tree to confirm no operator.* keys or email-shaped strings
+  leaked into a committed file.
+
 ENVIRONMENT
   SPECKIT_LINEAR_DOGFOOD_SAFE
                        When set to `1` / `true` / `yes`, the install
@@ -303,6 +314,12 @@ ENVIRONMENT
                        the target workspace already carries spec issues
                        for this project. Surfaces in the dependency
                        report and the final summary.
+  SPECKIT_LINEAR_STRICT_IDENTITY
+                       When set to `1` / `true` / `yes`, the install
+                       FAILS (exit 2) if the consumer's tracked tree
+                       carries operator identity (operator.* keys or an
+                       email-shaped string). Default is a loud warning
+                       per Principle VIII (Surface, Don't Enforce).
 
 EXIT CODES (per contracts/command-shapes.md §5.6)
   0  Install complete; all required dependencies green.
@@ -1484,6 +1501,112 @@ install::_ensure_operator_local_gitignored() {
     fi
     printf '%s\n' "$entry" >> .gitignore
     install::_log_info "added operator-local entry to .gitignore (${entry})"
+}
+
+# =============================================================================
+# install::assert_no_identity_leak  (consumer-side identity-leak guard)
+#
+# After the install ceremony writes config, scan the CONSUMER repo's
+# TRACKED working tree (`git ls-files`) for operator-identity leaks:
+#   * any `operator.*` identity key (user_id / name / email) — the
+#     pre-spec-004 committed `operator:` block shape; and
+#   * any email-shaped string — a strong tell that personal identity
+#     was committed into a tracked file.
+#
+# This mirrors the bridge-repo privacy guard in
+# tests/unit/no-real-identifiers.bats but runs against the CONSUMER
+# tree at install time. The gitignored linear-operator.local.yml is
+# never tracked, so `git ls-files` excludes it by construction — only
+# a leak into a COMMITTED/STAGED file can trip this.
+#
+# Principle VIII (Surface, Don't Enforce): by default this is a LOUD
+# warning that names the offending file(s) and the remediation, and
+# records the finding in the install summary as a warning. Operators
+# who want a hard gate (e.g. CI) export
+# SPECKIT_LINEAR_STRICT_IDENTITY=1 to make a detected leak fail the
+# install (exit 2).
+#
+# Returns 0 when clean; 0 with a recorded warning on a leak in the
+# default (surface) mode; exits 2 in strict mode.
+# =============================================================================
+install::assert_no_identity_leak() {
+    # Not a git repo (or git unavailable) → nothing tracked to scan.
+    if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+        install::_log_info "identity-leak guard: not a git work tree; skipping tracked-tree scan"
+        return 0
+    fi
+
+    # The operator-local identity file is allowed to carry identity; it
+    # is gitignored and so should never be tracked. We exclude it from
+    # the scan defensively in case an operator force-added it (that is a
+    # distinct, separately-warned condition handled below).
+    local op_local="$INSTALL_OPERATOR_LOCAL_PATH"
+
+    # Email-shaped string: <local>@<domain>.<tld>. Kept deliberately
+    # close to a conventional address shape so config UUIDs / URLs do
+    # not false-positive. ERE; case-insensitive at the call site.
+    local email_re='[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}'
+    # operator.* identity keys, as they appear in a committed YAML
+    # `operator:` block: a `user_id:`, `name:`, or `email:` line nested
+    # under an `operator:` key. We match the key lines directly since a
+    # tracked file should carry NONE of them post-spec-004.
+    local opkey_re='^[[:space:]]*(user_id|name|email)[[:space:]]*:'
+
+    local leak_files="" had_leak=0
+    local f
+    while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+        # Skip the operator-local file itself (handled separately).
+        [[ "$f" == "$op_local" ]] && continue
+        # Binary-safe email scan.
+        if grep -IiqE -- "$email_re" "$f" 2>/dev/null; then
+            leak_files+="  ${f} (email-shaped string)"$'\n'
+            had_leak=1
+            continue
+        fi
+        # Only inspect the linear config / extension files for the
+        # operator.* key shape — a bare `name:`/`email:` line is common
+        # in unrelated tracked files, so we scope the key-shape check to
+        # files that sit under the extension's config dir OR carry an
+        # `operator:` block.
+        if [[ "$f" == "$INSTALL_CONFIG_DIR"/* ]] || grep -Iq '^[[:space:]]*operator:[[:space:]]*$' "$f" 2>/dev/null; then
+            if grep -IqE -- "$opkey_re" "$f" 2>/dev/null \
+                && grep -Iq '^[[:space:]]*operator:[[:space:]]*$' "$f" 2>/dev/null; then
+                leak_files+="  ${f} (operator.* identity key)"$'\n'
+                had_leak=1
+            fi
+        fi
+    done < <(git ls-files -z 2>/dev/null | tr '\0' '\n')
+
+    # Separately flag a force-added operator-local file (it should be
+    # gitignored; if tracked, identity is leaking regardless of content).
+    if git ls-files --error-unmatch "$op_local" >/dev/null 2>&1; then
+        leak_files+="  ${op_local} (operator-local identity file is TRACKED — must be gitignored)"$'\n'
+        had_leak=1
+    fi
+
+    if (( had_leak == 0 )); then
+        install::_log_info "identity-leak guard: tracked tree clean (no operator.* keys or email-shaped strings)"
+        summary::add "updated" "identity-leak guard: tracked tree clean"
+        return 0
+    fi
+
+    local msg="operator identity may be leaking into TRACKED (committed) files:
+${leak_files}Remediation:
+  - The committed linear-config.yml MUST be identity-free; identity belongs
+    only in the gitignored ${INSTALL_OPERATOR_LOCAL_PATH}.
+  - Move any operator.* keys / email out of the tracked file(s) above, then
+    re-stage. If already committed, the identity now persists in git history;
+    scrub it with: git filter-repo --path <file> --invert-paths   (or BFG)."
+
+    if [[ "${SPECKIT_LINEAR_STRICT_IDENTITY:-}" =~ ^(1|true|yes)$ ]]; then
+        summary::add "error" "identity-leak guard (strict): identity found in tracked files"
+        install::_die 2 "${msg}"
+    fi
+
+    install::_log_warn "${msg}"
+    summary::add "warned" "identity-leak guard: identity found in tracked files (see WARN above; export SPECKIT_LINEAR_STRICT_IDENTITY=1 to make this fail)"
+    return 0
 }
 
 # install::_substitute_uuid_placeholder <file> <key> <uuid>
@@ -3389,6 +3512,12 @@ install::main() {
     if [[ -e "$INSTALL_OPERATOR_LOCAL_PATH" ]]; then
         summary::add "created" "operator-local identity at ${INSTALL_OPERATOR_LOCAL_PATH} (gitignored)"
     fi
+
+    # ---- spec 004 hardening: consumer-side identity-leak guard ------------
+    # Scan the consumer's TRACKED tree for operator.* keys / email-shaped
+    # strings now that config is written. Loud-warns (Principle VIII) and
+    # records the finding; SPECKIT_LINEAR_STRICT_IDENTITY=1 makes it fail.
+    install::assert_no_identity_leak
 
     # ---- Step 3: register after_* hooks (T042 / FR-031) --------------------
     install::register_after_hooks
