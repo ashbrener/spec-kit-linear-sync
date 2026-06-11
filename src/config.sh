@@ -457,6 +457,24 @@ config::_maybe_migrate_operator_block() {
     # 3. Emit exactly one migration notice.
     if (( _CONFIG_MIGRATION_NOTICE_EMITTED == 0 )); then
         config::_warn "migrated operator identity out of ${committed_path} into ${local_path} (spec 004, FR-007); the committed config no longer carries operator.* keys. Commit ${committed_path}; do not commit ${local_path} (it is gitignored)."
+
+        # spec 004 hardening: the pre-split config was COMMITTED, so the
+        # operator's identity already persists in this repo's git history.
+        # Stripping the live file does NOT remove it from history. Surface
+        # the exact forensic + scrub remediation LOUDLY (Principle VIII)
+        # so the operator — not the tool — decides whether to rewrite
+        # history. We pick the most distinctive needle we have (the
+        # user_id UUID, else the email) for the `git log -S` pickaxe.
+        local needle="${legacy_user_id:-${legacy_email:-${legacy_name}}}"
+        config::_warn "SECURITY: the previous COMMITTED ${committed_path} carried the operator's identity, so it now persists in this repo's GIT HISTORY (stripping the live file does not erase past commits). Audit and, if needed, scrub it yourself:
+  1. Confirm where it appears:
+       git log -S '${needle}' -- ${committed_path}
+  2. Scrub it from history (rewrites SHAs — coordinate with collaborators):
+       git filter-repo --path ${committed_path} --invert-paths   # recommended
+       # or, with BFG:  bfg --delete-files linear-config.yml
+  3. Force-push the rewritten history and have collaborators re-clone.
+The bridge will NOT rewrite your history for you (Principle VIII)."
+
         _CONFIG_MIGRATION_NOTICE_EMITTED=1
     fi
 }

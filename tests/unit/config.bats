@@ -565,12 +565,35 @@ EOF
 
     run bash -c "cd '${work}'; unset LINEAR_OPERATOR_USER_ID; source '${CONFIG_SH}'; config::load '.specify/extensions/linear/linear-config.yml' 2>&1; echo '---'; config::resolve_operator_user_id"
     [ "${status}" -eq 0 ]
-    # The pre-existing local identity wins; legacy value is dropped.
-    [[ "${output}" == *"77777777-7777-7777-7777-777777777777"* ]]
-    [[ "${output}" != *"33333333-3333-3333-3333-333333333333"* ]]
+    # The RESOLVED identity (the line after the --- marker) is the
+    # pre-existing local value, not the dropped legacy one. We scope to
+    # the post-marker tail because the migration warning legitimately
+    # references the legacy needle in its git-history scrub guidance.
+    local resolved="${output##*---}"
+    [[ "${resolved}" == *"77777777-7777-7777-7777-777777777777"* ]]
+    [[ "${resolved}" != *"33333333-3333-3333-3333-333333333333"* ]]
     # Local file not clobbered.
     run grep -q '77777777-7777-7777-7777-777777777777' "${opfile}"
     [ "${status}" -eq 0 ]
+}
+
+@test "spec-004 hardening: legacy migration emits a loud git-history scrub warning" {
+    local work="${TEST_TMP}/migrate-history"
+    mkdir -p "${work}/.specify/extensions/linear"
+    local cfg="${work}/.specify/extensions/linear/linear-config.yml"
+    write_valid_config "${cfg}"
+    awk '/^  project:/ && !done { print "  operator:"; print "    user_id: \"33333333-3333-3333-3333-333333333333\""; print "    name: \"Legacy\""; print "    email: \"legacy@example.com\""; done=1 } { print }' \
+        "${cfg}" > "${cfg}.tmp" && mv "${cfg}.tmp" "${cfg}"
+
+    run bash -c "cd '${work}'; unset LINEAR_OPERATOR_USER_ID; source '${CONFIG_SH}'; config::load '.specify/extensions/linear/linear-config.yml' 2>&1"
+    [ "${status}" -eq 0 ]
+    # The warning names git history persistence ...
+    [[ "${output}" == *"GIT HISTORY"* ]]
+    # ... prints the git log -S pickaxe with the leaked needle ...
+    [[ "${output}" == *"git log -S"* ]]
+    [[ "${output}" == *"33333333-3333-3333-3333-333333333333"* ]]
+    # ... and the history-scrub remediation.
+    [[ "${output}" == *"git filter-repo"* ]]
 }
 
 @test "edge: malformed operator-local file surfaces a clear diagnostic (no silent failure)" {

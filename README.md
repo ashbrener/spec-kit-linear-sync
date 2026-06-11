@@ -274,6 +274,15 @@ The bridge uses a **two-file model** (spec [`004-config-identity-split`](./specs
 | `.specify/extensions/linear/linear-config.yml` | **Yes — committed** | The shareable binding: team/project UUIDs, workflow-state + label UUID maps, and behaviour toggles. No personal data. Cloning the repo gives a collaborator everything they need to sync. |
 | `.specify/extensions/linear/linear-operator.local.yml` | **No — gitignored** | The operator's identity: `user_id` (Linear assignee), name, email. Scaffolded by `/speckit.linear.install`, which also guarantees `*.local.yml` is in `.gitignore` (FR-002, FR-003). |
 
+### Per-developer onboarding contract
+
+Identity is **per-person, never shared**. The committed `linear-config.yml` is identity-free; everyone who clones the repo inherits the same shareable binding. Each developer runs `/speckit.linear.install` **once on their own machine** to scaffold their **own** gitignored `linear-operator.local.yml` (their Linear `user_id` / name / email). You do not commit your identity, and you never inherit a teammate's.
+
+The install hardens this contract on every run:
+
+1. It guarantees `*.local.yml` is in `.gitignore` **before** writing any identity, so identity can never be staged.
+2. After writing config, it scans the consumer's **tracked** tree (`git ls-files`) for `operator.*` identity keys or email-shaped strings and **loudly warns**, naming the offending file(s), if any leaked into a committed file (Principle VIII — Surface, Don't Enforce). Export `SPECKIT_LINEAR_STRICT_IDENTITY=1` to turn that warning into a hard failure (exit 2) — useful in CI.
+
 `linear-config.yml` schema (full spec at [`specs/001-spec-kit-linear-bridge/contracts/config-schema.json`](./specs/001-spec-kit-linear-bridge/contracts/config-schema.json)):
 
 | Field | Required | Description |
@@ -303,6 +312,19 @@ Reconcile resolves the operator assignee via this cascade and **never** reads id
 ### Upgrading from a single-file config
 
 A pre-split `linear-config.yml` that still carries an `operator:` block keeps working. On the first run the bridge moves the identity into `linear-operator.local.yml`, strips the `operator:` block from the committed config, and emits exactly one migration notice. It's idempotent — subsequent runs are silent (FR-007).
+
+**Heads-up on git history:** if that pre-split config was already committed, the operator's identity now persists in your repo's **git history** — stripping the live file does not erase past commits. The migration notice surfaces this loudly and prints the exact remediation so you (not the tool) decide whether to rewrite history:
+
+```sh
+# 1. Confirm where the identity appears in history:
+git log -S '<operator-user-id-or-email>' -- .specify/extensions/linear/linear-config.yml
+# 2. Scrub it (rewrites SHAs — coordinate with collaborators):
+git filter-repo --path .specify/extensions/linear/linear-config.yml --invert-paths   # recommended
+# or, with BFG:  bfg --delete-files linear-config.yml
+# 3. Force-push and have collaborators re-clone.
+```
+
+The bridge never rewrites your history for you (Principle VIII).
 
 ## Troubleshooting
 
