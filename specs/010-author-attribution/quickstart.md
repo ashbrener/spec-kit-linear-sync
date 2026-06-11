@@ -39,9 +39,11 @@ That's the whole minimum. The next reconcile (any `after_*` hook, or
 Per spec, in order:
 
 1. An explicit owner line in `spec.md` — add either to the metadata block:
+
    ```markdown
    **Owner:** alice@example.com
    ```
+
    (`**Author:**` works too; a bare handle like `**Owner:** alice` also works.)
 2. Otherwise, the **first** person to commit the spec directory (git history).
 3. Otherwise *unknown* — no label, no assignee, no error.

@@ -11,6 +11,7 @@ resolved author projects onto the spec Issue's label + create-time assignee.
 ## 1. Parser surface (parser.sh) — filesystem author resolution
 
 ### `parser::spec_owner_line <spec_md_path> → identity | ""`
+
 - Scans for the first line matching (case-sensitive label, tolerant markup):
   `^\s*[-*]?\s*\*\*(Owner|Author)\*\*\s*:\s*(.+?)\s*$`
 - Echoes the trimmed capture group. Empty output if absent.
@@ -18,12 +19,14 @@ resolved author projects onto the spec Issue's label + create-time assignee.
   the email.
 
 ### `parser::spec_git_first_author <spec_dir> → email | ""`
+
 - `git -C <repo> log --diff-filter=A --reverse --format='%ae' -- <spec_dir> |
   head -1`.
 - Empty if no git history, dir untracked, or not a git repo (graceful — no error,
   no `set -e` abort: capture as `x="$(…)" || x=""`).
 
 ### `parser::resolve_author <spec_dir> <spec_md> → "<identity>\t<source>"`
+
 - Applies `config::attribution_source_order` (default `owner_line git_first_add`):
   first source that yields a non-empty identity wins.
 - Emits `<identity>\t<source>` with `source ∈ {owner_line, git_first_add}`; emits
@@ -58,6 +61,7 @@ query AttributionUsers($after: String) {
   this run (label-only), do NOT halt (Principle VIII).
 
 ### `reconcile::_resolve_author_user <identity> → uuid | ""`
+
 1. **Override first**: if `config::load_authors_override` recorded `<identity>`
    (or its handle) → return its `linear_user_id`, or `""` if the sentinel
    non-member / `null`.
@@ -66,6 +70,7 @@ query AttributionUsers($after: String) {
 3. Else `""` (non-member / unknown / inactive).
 
 ### `reconcile::_author_handle <identity> → handle`
+
 - Override `handle` → email local-part → bare identity (D3), then sanitise
   (lowercase, collapse non-`[a-z0-9._-]` to `-`, trim `-`, length-cap).
 - MUST NOT emit a string containing `@` or a full email (SC-006).
@@ -75,6 +80,7 @@ query AttributionUsers($after: String) {
 ## 3. Projection onto the spec Issue
 
 ### Label (when `config::attribution_label` && author ≠ unknown)
+
 - At the spec-Issue desired-label computation (same site as `phase:*`):
   - strip every existing `author:*` from the current label set;
   - add `author:<handle>`;
@@ -85,6 +91,7 @@ query AttributionUsers($after: String) {
   (zero churn, SC-003). Author change ⇒ exactly one strip + one add.
 
 ### Create-time assignee
+
 | Condition | `assigneeId` on create |
 |---|---|
 | attribution OFF | operator (`_resolve_operator_assignee_id`, FR-034) |
@@ -93,10 +100,12 @@ query AttributionUsers($after: String) {
 | ON + `assignee` false | omitted (unassigned); label still stamped |
 
 ### Update-time assignee
+
 - **Never sent**, in all cases (FR-008). Manual reassignment persists. This is
   the existing FR-034 invariant — unchanged by this feature.
 
 ### Sub-issues
+
 - Author **label** inherited iff `config::attribution_subissue_label` (default
   OFF). Author **assignee** never set on sub-issues (FR-013).
 

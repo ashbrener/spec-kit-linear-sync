@@ -132,6 +132,7 @@ One clarification was resolved in the 2026-06-11 `/speckit-clarify` session — 
 - **Decision**: An OPTIONAL operator-local file at
   `.specify/extensions/linear/linear-authors.local.yml`, modelled exactly on the
   spec-004 `linear-operator.local.yml` split:
+
   ```yaml
   schema_version: 1
   authors:
@@ -142,6 +143,7 @@ One clarification was resolved in the 2026-06-11 `/speckit-clarify` session — 
       handle: contractor
       linear_user_id: null    # known author, no Linear account → label only
   ```
+
   - The file is **gitignored** by the existing `.specify/extensions/linear/
     *.local.yml` glob (already present for spec 004 — no `.gitignore` change).
   - Only a **`linear-authors.local.yml.sample`** with placeholder values is
@@ -168,6 +170,7 @@ One clarification was resolved in the 2026-06-11 `/speckit-clarify` session — 
 - **Decision**: Add an additive, default-OFF block to `linear-config.yml`, parsed
   by the existing `config::_parse_file` (shallow two-level YAML), with accessors
   mirroring the spec-007 `mapping.*` / spec-004 operator accessors:
+
   ```yaml
   linear:
     attribution:
@@ -178,6 +181,7 @@ One clarification was resolved in the 2026-06-11 `/speckit-clarify` session — 
       authors_file: linear-authors.local.yml        # optional override (D5)
       subissue_label: false       # inherit author label onto sub-issues (default off)
   ```
+
   Accessors (all defaulting safely): `config::attribution_enabled` (default
   false), `config::attribution_assignee` (default true), `config::attribution_label`
   (default true), `config::attribution_source_order` (default `owner_line
