@@ -588,3 +588,85 @@ parser::plan_branch() {
     esac
     printf '%s' "$br"
 }
+
+# ---------------------------------------------------------------------------
+# parser::adr_records <spec_dir>   (spec 008 — ADR / decision-record mirroring)
+#
+# Read <spec_dir>/research.md and emit one tab-separated record per ADR:
+#   <key>\t<title>\t<decision>\t<rationale>\t<alternatives>\t<source>
+# with embedded tabs/newlines escaped as \t / \n (contracts/research-adr-
+# grammar.md §5). Key = explicit `## D<N>/R<N>` heading id, else a title slug
+# (lowercase, non-alnum→hyphen, trimmed, ≤48), with a positional `-<n>` suffix
+# when two records collide on the same base key. Graceful-empty: absent or
+# block-less research.md emits nothing, returns 0 (FR-007). `LC_ALL=C awk` for
+# byte-stable em-dash handling across GNU/BSD (same dance as the phase parser).
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2016
+readonly PARSER_ADR_AWK='
+function trim(s) { sub(/^[ \t\r]+/, "", s); sub(/[ \t\r]+$/, "", s); return s }
+function esc(s) { gsub(/\t/, "\\t", s); gsub(/\n/, "\\n", s); return s }
+function slug(s,   t) {
+    t = tolower(s); gsub(/[^a-z0-9]+/, "-", t);
+    sub(/^-+/, "", t); sub(/-+$/, "", t); return substr(t, 1, 48)
+}
+function flushsub() {
+    if (cur == "dec") dec = trim(curval)
+    else if (cur == "rat") rat = trim(curval)
+    else if (cur == "alt") alt = trim(curval)
+    curval = ""; cur = ""
+}
+function flush() {
+    flushsub()
+    if (!in_block) return
+    if (id != "" || has_sub) {
+        rid[n] = id; rtitle[n] = title; rdec[n] = dec; rrat[n] = rat; ralt[n] = alt; n++
+    }
+    id = ""; title = ""; dec = ""; rat = ""; alt = ""; has_sub = 0; in_block = 0
+}
+function startsub(name, text) {
+    if (!in_block) { in_block = 1; id = ""; title = "" }
+    flushsub(); cur = name; curval = text; has_sub = 1
+}
+function slugsrc(i,   v, k, parts) {
+    if (rtitle[i] != "") return rtitle[i]
+    v = (rdec[i] != "") ? rdec[i] : ((rrat[i] != "") ? rrat[i] : ralt[i])
+    split(v, parts, /[ \t\n]+/)
+    for (k = 1; k <= length(parts); k++) if (parts[k] != "") return parts[k]
+    return "adr"
+}
+BEGIN { n = 0; in_block = 0; id = ""; title = ""; dec = ""; rat = ""; alt = ""; has_sub = 0; cur = ""; curval = "" }
+/^## / {
+    flush(); in_block = 1
+    line = $0; sub(/^##[ \t]+/, "", line)
+    if (line ~ /^[DR][0-9]+[ \t]/) {
+        id = line; sub(/[ \t].*$/, "", id)
+        title = line; sub(/^[DR][0-9]+[ \t]+/, "", title)
+        sub(/^(\xe2\x80\x94|--)[ \t]+/, "", title)
+        title = trim(title)
+    } else { id = ""; title = trim(line) }
+    next
+}
+/^- \*\*Decision\*\*:/                 { t = $0; sub(/^- \*\*Decision\*\*:[ \t]*/, "", t); startsub("dec", t); next }
+/^- \*\*Rationale\*\*:/                { t = $0; sub(/^- \*\*Rationale\*\*:[ \t]*/, "", t); startsub("rat", t); next }
+/^- \*\*Alternatives considered\*\*:/  { t = $0; sub(/^- \*\*Alternatives considered\*\*:[ \t]*/, "", t); startsub("alt", t); next }
+{
+    if (cur != "") {
+        if ($0 ~ /^[ \t]+[^ \t]/ || $0 ~ /^[ \t]*$/) { curval = curval "\n" trim($0) }
+        else { flushsub() }
+    }
+}
+END {
+    flush()
+    for (i = 0; i < n; i++) { basekey[i] = (rid[i] != "") ? rid[i] : slug(slugsrc(i)); cnt[basekey[i]]++ }
+    for (i = 0; i < n; i++) {
+        base = basekey[i]
+        if (cnt[base] > 1) { seen[base]++; key = base "-" seen[base] } else { key = base }
+        printf "%s\t%s\t%s\t%s\t%s\t%s\n", key, esc(rtitle[i]), esc(rdec[i]), esc(rrat[i]), esc(ralt[i]), "research.md"
+    }
+}'
+
+parser::adr_records() {
+    local research_md="${1%/}/research.md"
+    [[ -f "$research_md" ]] || return 0
+    LC_ALL=C awk "$PARSER_ADR_AWK" "$research_md"
+}

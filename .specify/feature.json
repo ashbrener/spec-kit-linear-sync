@@ -1,1 +1,3 @@
-{"feature_directory":"specs/007-configurable-mapping"}
+{
+  "feature_directory": "specs/008-adr-mirroring"
+}
