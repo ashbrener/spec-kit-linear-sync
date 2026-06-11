@@ -6,10 +6,12 @@ shell commands, and other important information, read the current plan
 <!-- Everything below is OUTSIDE the SPECKIT-managed block on purpose, so
      `specify integration upgrade` cannot overwrite it. Keep project rules here. -->
 
-The current plan is `specs/007-configurable-mapping/plan.md` (configurable
-artifact mapping — operator-configurable spec→Linear mapping with the spec-001
-mapping preserved as the frozen zero-config default; resolves design issue #17;
-faithful port of the spec-kit-jira `specs/002-configurable-mapping` model).
+The current plan is `specs/008-adr-mirroring/plan.md` (ADR / decision-record
+mirroring — mirror each spec's research.md Decision/Rationale/Alternatives blocks
+as at-most-once, update-in-place comments on the spec's Linear Issue; a near-clone
+of the clarify-comment path, parity-locked with the spec-kit-jira ADR feature; no
+config/schema change). It builds on `specs/007-configurable-mapping/plan.md`
+(configurable mapping, resolves #17) and the earlier shipped baselines.
 It builds on the shipped baselines: `specs/006-faithful-projection/plan.md`,
 `specs/005-team-scoped-seeding/plan.md`, `specs/004-config-identity-split/plan.md`,
 the drift-aware write-authority redesign at `specs/003-drift-aware-authority/plan.md`,
