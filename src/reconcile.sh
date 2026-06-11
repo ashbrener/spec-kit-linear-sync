@@ -153,6 +153,14 @@ readonly RECONCILE_TASK_PHASE_LABEL_COLOR="#9CA3AF"
 # specs in a single --all sweep hits Linear at most once.
 declare -gA _RECONCILE_LABEL_ID_CACHE=()
 
+# 010 — workspace users roster cache (author→Linear-user resolution).
+# Populated lazily by reconcile::_resolve_workspace_users on first author
+# lookup, at most once per reconcile (paginated). Keyed by lowercased email.
+declare -gA _RECONCILE_USERS_BY_EMAIL=()
+declare -gA _RECONCILE_USERS_ACTIVE=()
+declare -g _RECONCILE_USERS_LOADED=0
+declare -g _RECONCILE_USERS_FAILED=0
+
 # FR-034 graceful-degradation flag — set to 1 the first time
 # reconcile::_resolve_operator_assignee_id sees an empty
 # linear.operator.user_id so the missing-operator warning fires
@@ -1312,6 +1320,8 @@ reconcile::_resolve_label_id() {
         if [[ "$name" == task-phase:* ]]; then
             create_color="$RECONCILE_TASK_PHASE_LABEL_COLOR"
         fi
+        # 010: author:<handle> is a bridge-owned system label (neutral color),
+        # lazy-created on first use like speckit-spec:* / task-phase:*.
         if ! id="$(reconcile::_label_create_workspace "$name" "$create_color")"; then
             return 1
         fi
@@ -1363,7 +1373,9 @@ reconcile::_resolve_label_ids_array() {
     local name id allow_create
     for name in "$@"; do
         [[ -n "$name" ]] || continue
-        if [[ "$name" == speckit-spec:* || "$name" == task-phase:* || "$name" == speckit-task:* ]]; then
+        if [[ "$name" == speckit-spec:* || "$name" == task-phase:* || "$name" == speckit-task:* || "$name" == author:* ]]; then
+            # author:* — the 010 authorship label, lazy-created like the
+            # other bridge-owned identity labels (neutral system color).
             # speckit-task:* — the task-level identity label for the #17
             # spec-as-Project shape (task→sub-issue). Lazy-created like
             # speckit-spec:* (neutral system-label color) so the mapped
@@ -1423,6 +1435,131 @@ reconcile::_resolve_operator_assignee_id() {
         return 0
     fi
     printf '%s' "$user_id"
+}
+
+# =============================================================================
+# 010 — Author attribution: workspace user roster + author→user + handle.
+#
+# These power the opt-in author assignee/label. All read-only; the roster
+# is fetched at most once per reconcile (lazy, paginated, cached). On any
+# transport failure the roster degrades to empty (authors resolve to
+# non-member ⇒ unassigned) without halting (Principle VIII).
+# =============================================================================
+
+# reconcile::_resolve_workspace_users
+#   Lazily fetch the Linear `users` connection (paginated) and index it by
+#   lowercased email → {id, active} into the module-global cache. Idempotent
+#   (a latch makes it a no-op after the first call). Field is `users` (a
+#   UserConnection), NOT `workspaceMembers`.
+reconcile::_resolve_workspace_users() {
+    (( _RECONCILE_USERS_LOADED == 1 )) && return 0
+    _RECONCILE_USERS_LOADED=1
+
+    local query='query AttributionUsers($after: String) {
+        users(first: 250, after: $after, includeArchived: false) {
+            nodes { id email active }
+            pageInfo { hasNextPage endCursor }
+        }
+    }'
+    local after="" has_next="true" guard=0
+    while [[ "$has_next" == "true" ]] && (( guard < 50 )); do
+        guard=$(( guard + 1 ))
+        local vars response
+        if [[ -n "$after" ]]; then
+            vars="$(jq -nc --arg a "$after" '{after: $a}')"
+        else
+            vars='{}'
+        fi
+        if ! response="$(graphql::query "$query" "$vars" 2>/dev/null)"; then
+            _RECONCILE_USERS_FAILED=1
+            summary::add warned "workspace users lookup failed; author assignees unresolved this run (Issues created unassigned)"
+            return 0
+        fi
+        local uid email active lc
+        while IFS=$'\037' read -r uid email active; do
+            [[ -n "$email" ]] || continue
+            lc="${email,,}"
+            _RECONCILE_USERS_BY_EMAIL["$lc"]="$uid"
+            _RECONCILE_USERS_ACTIVE["$lc"]="$active"
+        done < <(printf '%s' "$response" \
+            | jq -r '.data.users.nodes[]? | [.id, .email, (.active|tostring)] | join("")')
+        has_next="$(printf '%s' "$response" | jq -r '.data.users.pageInfo.hasNextPage // false')"
+        after="$(printf '%s' "$response" | jq -r '.data.users.pageInfo.endCursor // ""')"
+        [[ -n "$after" ]] || has_next="false"
+    done
+    return 0
+}
+
+# reconcile::_resolve_author_user <identity>
+#   Resolve an author identity (email or bare handle) to a Linear user UUID.
+#   Override map first (CONFIG_AUTHORS_*): an override-governed author with a
+#   non-null linear_user_id → that UUID; present-but-null/absent → non-member
+#   (empty). Otherwise, for an email identity, match the cached roster
+#   case-insensitively (active members only). Empty output ⇒ unassigned.
+reconcile::_resolve_author_user() {
+    local identity="$1"
+    [[ -n "$identity" ]] || return 0
+    local lc="${identity,,}"
+
+    # Override map governs when the identity (email or handle) is present in
+    # either override array.
+    if [[ -n "${CONFIG_AUTHORS_USER_ID[$lc]+x}" || -n "${CONFIG_AUTHORS_HANDLE[$lc]+x}" ]]; then
+        local uid="${CONFIG_AUTHORS_USER_ID[$lc]:-}"
+        if [[ -n "$uid" && "$uid" != "null" ]]; then
+            printf '%s' "$uid"
+        fi
+        return 0
+    fi
+
+    # Roster resolution only makes sense for an email identity.
+    [[ "$identity" == *@* ]] || return 0
+    reconcile::_resolve_workspace_users
+    local uid="${_RECONCILE_USERS_BY_EMAIL[$lc]:-}"
+    local active="${_RECONCILE_USERS_ACTIVE[$lc]:-}"
+    if [[ -n "$uid" && "$active" == "true" ]]; then
+        printf '%s' "$uid"
+    fi
+    return 0
+}
+
+# reconcile::_author_handle <identity>
+#   Derive the non-PII label handle: override handle → email local-part →
+#   bare identity, then sanitise (lowercase, collapse non-[a-z0-9._-] to '-',
+#   trim '-', cap 32). NEVER emits an '@' or a full email (FR-005 / SC-006).
+reconcile::_author_handle() {
+    local identity="$1"
+    [[ -n "$identity" ]] || return 0
+    local lc="${identity,,}"
+    local handle="${CONFIG_AUTHORS_HANDLE[$lc]:-}"
+    if [[ -z "$handle" ]]; then
+        if [[ "$identity" == *@* ]]; then
+            handle="${identity%%@*}"
+        else
+            handle="$identity"
+        fi
+    fi
+    handle="$(printf '%s' "$handle" \
+        | tr '[:upper:]' '[:lower:]' \
+        | sed -E 's/[^a-z0-9._-]+/-/g; s/^[-]+//; s/[-]+$//')"
+    handle="${handle:0:32}"
+    handle="${handle%-}"
+    printf '%s' "$handle"
+}
+
+# reconcile::_summarize_author <feature_number> <identity> <source> <assignee_id>
+#   Emit one INFO summary row per spec describing how it was attributed
+#   (FR-003 / research D9). Only called when attribution is enabled.
+reconcile::_summarize_author() {
+    local fn="$1" identity="$2" source="$3" assignee="$4"
+    if [[ -z "$identity" ]]; then
+        summary::add info "spec ${fn}: author=unknown (no owner/git) → unassigned"
+        return 0
+    fi
+    if [[ -n "$assignee" ]]; then
+        summary::add info "spec ${fn}: author=${identity} (${source}) → assigned ${assignee: -4}"
+    else
+        summary::add info "spec ${fn}: author=${identity} (${source}) → unassigned (non-member)"
+    fi
 }
 
 # =============================================================================
@@ -2700,6 +2837,29 @@ reconcile::sync_spec_issue() {
     spec_label="speckit-spec:${feature_number}"
     phase_label="phase:${lifecycle_phase}"
 
+    # 010 — author attribution (opt-in). Resolve the spec author ONCE; the
+    # create and update paths below consume author_label / author_assignee.
+    # Disabled ⇒ all empty: the operator-assignee path (FR-034) and no author
+    # label, byte-for-byte today's behaviour (FR-015). author_assignee is the
+    # resolved member UUID or empty (unassigned, D7 — never the operator).
+    local author_label="" author_assignee=""
+    if config::attribution_enabled; then
+        local _ar author_identity author_source author_handle
+        _ar="$(parser::resolve_author "$spec_dir" "${spec_dir%/}/spec.md")"
+        author_identity="${_ar%%$'\t'*}"
+        author_source="${_ar#*$'\t'}"
+        if [[ -n "$author_identity" ]]; then
+            if config::attribution_label; then
+                author_handle="$(reconcile::_author_handle "$author_identity")"
+                [[ -n "$author_handle" ]] && author_label="author:${author_handle}"
+            fi
+            if config::attribution_assignee; then
+                author_assignee="$(reconcile::_resolve_author_user "$author_identity")"
+            fi
+        fi
+        reconcile::_summarize_author "$feature_number" "$author_identity" "$author_source" "$author_assignee"
+    fi
+
     local title="${feature_number}-${short_name}"
 
     # FR-035: roll up [N] markers across all of tasks.md into the spec
@@ -2769,13 +2929,32 @@ reconcile::sync_spec_issue() {
                 --arg id "$agent_label_id" '. + [$id] | unique')"
         fi
 
-        # FR-034: stamp assigneeId on issueCreate so the operator owns
-        # newly-minted spec Issues. NEVER pass assigneeId on issueUpdate
-        # (single-write-on-create) so manual reassignment in Linear's
-        # UI persists across reconciles. Empty assignee_id ⇒ degrade
-        # gracefully and create unassigned (warn-once).
+        # 010: stamp the author:<handle> label on create (opt-in). Lazy-
+        # created (allow_create=1) like the other bridge-owned identity
+        # labels. Empty author_label ⇒ attribution off / label off / unknown
+        # author ⇒ no stamp.
+        if [[ -n "$author_label" ]]; then
+            local author_label_id
+            if author_label_id="$(reconcile::_resolve_label_id "$author_label" 1)"; then
+                if [[ -n "$author_label_id" ]]; then
+                    labels_json="$(printf '%s' "$labels_json" | jq -c \
+                        --arg id "$author_label_id" '. + [$id] | unique')"
+                fi
+            fi
+        fi
+
+        # Assignee on issueCreate. NEVER passed on issueUpdate (single-write-
+        # on-create) so manual reassignment in Linear persists. When
+        # attribution is ON the author owns the Issue (or it is left
+        # unassigned for a non-member/unknown author — D7, never the
+        # operator); when OFF the operator owns it (FR-034). Empty ⇒ create
+        # unassigned.
         local assignee_id
-        assignee_id="$(reconcile::_resolve_operator_assignee_id)"
+        if config::attribution_enabled; then
+            assignee_id="$author_assignee"
+        else
+            assignee_id="$(reconcile::_resolve_operator_assignee_id)"
+        fi
 
         local input_json
         if [[ -n "$assignee_id" ]]; then
@@ -2919,6 +3098,21 @@ reconcile::sync_spec_issue() {
             '. + [$label] | unique')"
     fi
 
+    # 010: author label strip-and-set (opt-in). Remove any stale author:*
+    # and add the current author:<handle>. Gated on attribution.enabled so a
+    # disabled install never touches author labels (FR-015). Empty
+    # author_label (label off / unknown author) ⇒ strip only (cleans up a
+    # stale label when the author becomes unknown or the toggle flips off).
+    # Idempotent: an unchanged author yields the same set ⇒ no label write.
+    if config::attribution_enabled; then
+        desired_labels_json="$(printf '%s' "$desired_labels_json" | jq -c \
+            '[.[] | select(startswith("author:") | not)]')"
+        if [[ -n "$author_label" ]]; then
+            desired_labels_json="$(printf '%s' "$desired_labels_json" | jq -c \
+                --arg label "$author_label" '. + [$label] | unique')"
+        fi
+    fi
+
     # Build the diff input. Only include fields that actually changed.
     local update_input='{}'
     if [[ "$current_title" != "$title" ]]; then
@@ -2987,6 +3181,21 @@ reconcile::sync_task_phase_subissues() {
     team_uuid="$(config::get_team_id)"
     project_uuid="$(config::get_project_id)"
 
+    # 010 — sub-issue author-label inheritance (opt-in, default OFF). Resolve
+    # the spec author's label ONCE; injected into the per-phase sub-issue
+    # label set below only when attribution.subissue_label is on. Sub-issues
+    # NEVER receive the author assignee (FR-013).
+    local sub_author_label=""
+    if config::attribution_enabled && config::attribution_subissue_label && config::attribution_label; then
+        local _sar _sid _shandle
+        _sar="$(parser::resolve_author "$spec_dir" "${spec_dir%/}/spec.md")"
+        _sid="${_sar%%$'\t'*}"
+        if [[ -n "$_sid" ]]; then
+            _shandle="$(reconcile::_author_handle "$_sid")"
+            [[ -n "$_shandle" ]] && sub_author_label="author:${_shandle}"
+        fi
+    fi
+
     # Build a JSON object { "1": "<sub-issue-id>", "2": "...", ... }
     # incrementally so the caller can resolve blocking relations.
     local phase_map='{}'
@@ -3053,13 +3262,29 @@ reconcile::sync_task_phase_subissues() {
                     --arg id "$sub_agent_label_id" '. + [$id] | unique')"
             fi
 
-            # FR-034: stamp assigneeId on issueCreate for the sub-issue
-            # too; sub-issues for task phases inherit the same operator
-            # assignee as the parent spec Issue. NEVER pass assigneeId
-            # on the issueUpdate branch below so manual reassignment in
-            # Linear's UI persists across reconciles.
+            # 010: inherit the spec author's label onto the sub-issue when
+            # attribution.subissue_label is on (default OFF ⇒ empty ⇒ skip).
+            if [[ -n "$sub_author_label" ]]; then
+                local sub_author_label_id
+                if sub_author_label_id="$(reconcile::_resolve_label_id "$sub_author_label" 1)"; then
+                    if [[ -n "$sub_author_label_id" ]]; then
+                        labels_json="$(printf '%s' "$labels_json" | jq -c \
+                            --arg id "$sub_author_label_id" '. + [$id] | unique')"
+                    fi
+                fi
+            fi
+
+            # Sub-issue assignee on create. When attribution is ON the
+            # sub-issue is left UNASSIGNED (FR-013: never the author; and we
+            # do not fall back to the operator — neutral mirror). When OFF,
+            # the sub-issue inherits the operator assignee (FR-034). NEVER
+            # passed on issueUpdate so manual reassignment persists.
             local sub_assignee_id
-            sub_assignee_id="$(reconcile::_resolve_operator_assignee_id)"
+            if config::attribution_enabled; then
+                sub_assignee_id=""
+            else
+                sub_assignee_id="$(reconcile::_resolve_operator_assignee_id)"
+            fi
 
             local sub_input
             if [[ -n "$state_uuid" ]]; then
@@ -3197,6 +3422,19 @@ reconcile::sync_task_phase_subissues() {
                 desired_labels="$(printf '%s' "$desired_labels" | jq -c \
                     --arg label "$sub_agent_label_name" \
                     '. + [$label] | unique')"
+            fi
+
+            # 010: sub-issue author label strip-and-set (opt-in). Strip stale
+            # author:* and add the inherited label when subissue_label is on
+            # (sub_author_label empty otherwise ⇒ strip only). Gated on
+            # attribution.enabled so a disabled install never touches it.
+            if config::attribution_enabled; then
+                desired_labels="$(printf '%s' "$desired_labels" | jq -c \
+                    '[.[] | select(startswith("author:") | not)]')"
+                if [[ -n "$sub_author_label" ]]; then
+                    desired_labels="$(printf '%s' "$desired_labels" | jq -c \
+                        --arg label "$sub_author_label" '. + [$label] | unique')"
+                fi
             fi
 
             local sub_update='{}'

@@ -1,0 +1,23 @@
+# spec-kit-linear — authors override SAMPLE (010 author attribution).
+#
+# OPTIONAL. Copy to `linear-authors.local.yml` (gitignored by the
+# `.specify/extensions/linear/*.local.yml` rule — NEVER COMMIT the real file)
+# only when you need to:
+#   - alias a git author email that differs from the person's Linear email, or
+#   - pin a stable handle / mark a non-member (someone with no Linear account).
+#
+# You do NOT need an entry for members whose git email matches their Linear
+# email — those resolve automatically against the workspace roster.
+#
+# Keys are the git author email (preferred) or a bare handle (matching a
+# `**Owner:** <handle>` line in spec.md). `linear_user_id: null` (or omitted)
+# means "known author, no Linear account" → the Issue gets the author label
+# but is left unassigned.
+schema_version: 1
+authors:
+  alice@example.com:
+    handle: alice
+    linear_user_id: "00000000-0000-0000-0000-000000000000"
+  contractor@example.com:
+    handle: contractor
+    linear_user_id: null

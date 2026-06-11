@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Author-based attribution — spec 010
+
+- **The board shows who authored each spec.** Opt-in (`linear.attribution.*`,
+  default OFF). When enabled, each spec Issue gets an account-independent
+  `author:<handle>` label and — for authors who are Linear members — is assigned
+  to that author on creation. A non-member or unresolved author is **labelled but
+  left unassigned** (never the operator). Disabled/absent ⇒ byte-for-byte today's
+  behaviour (operator assignee per FR-034, no author label).
+- **Author resolution is filesystem-derived.** A `**Owner:**` / `**Author:**`
+  line in `spec.md` wins; otherwise the first git author to add the spec
+  directory; otherwise *unknown* (a graceful no-op — no label, no assignee, no
+  failure).
+- **Members match automatically; the override map is optional.** Linear's member
+  roster is read at runtime, so a git email that matches a Linear email resolves
+  with no configuration. An optional, gitignored `linear-authors.local.yml`
+  (only a `.sample` is committed) aliases git≠Linear emails and pins handles for
+  non-members — no real email or user id ever lands in a tracked file (the
+  identity-leak guard covers it).
+- **Idempotent + never-clobber.** The author label is strip-and-set (zero churn
+  on re-run; one swap on author change); the author assignee is written on create
+  only, so a manual reassignment in Linear always survives. Sub-issues optionally
+  inherit the author *label* (`subissue_label`, default off) but never the author
+  assignee. Parity-locked with the spec-kit-jira author-attribution feature at the
+  user-visible level. No new command; `extension.id` stays `linear`.
+
 ### ADR / decision-record mirroring — spec 008
 
 - **Your decisions now reach the tracker.** The `Decision / Rationale /

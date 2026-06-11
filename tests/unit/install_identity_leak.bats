@@ -169,3 +169,42 @@ _run_guard() {
     "
     [ "${status}" -eq 0 ]
 }
+
+# ---------------------------------------------------------------------------
+# 010 — authors-override file (gitignored identity-bearing map)
+# ---------------------------------------------------------------------------
+
+@test "guard: a TRACKED authors-override file is flagged (warn) and fails under strict" {
+    mkdir -p "${CONFIG_DIR}"
+    printf 'linear:\n  team:\n    id: "11111111-1111-1111-1111-111111111111"\n' \
+        > "${CONFIG_DIR}/linear-config.yml"
+    # Force-track the gitignored authors file (the leak scenario).
+    printf 'schema_version: 1\nauthors:\n  dev@example.com:\n    handle: dev\n' \
+        > "${CONFIG_DIR}/linear-authors.local.yml"
+    git add -A -f
+    # Default (surface) mode: warns, exit 0.
+    _run_guard
+    [ "${status}" -eq 0 ]
+    [[ "${output}" == *"linear-authors.local.yml"* ]]
+    # Strict mode: hard-fail.
+    run bash -c "
+        cd '${TEST_TMP}'
+        export SPECKIT_LINEAR_STRICT_IDENTITY=1
+        source '${PROJECT_ROOT}/src/install.sh'
+        summary::start 'test'
+        install::assert_no_identity_leak
+    "
+    [ "${status}" -ne 0 ]
+}
+
+@test "guard: the authors .sample with placeholders passes cleanly (SC-006)" {
+    mkdir -p "${CONFIG_DIR}"
+    printf 'linear:\n  team:\n    id: "11111111-1111-1111-1111-111111111111"\n' \
+        > "${CONFIG_DIR}/linear-config.yml"
+    # The committed .sample carries example.com placeholders by design.
+    printf 'schema_version: 1\nauthors:\n  alice@example.com:\n    handle: alice\n    linear_user_id: "00000000-0000-0000-0000-000000000000"\n' \
+        > "${CONFIG_DIR}/linear-authors.local.yml.sample"
+    git add -A
+    _run_guard
+    [ "${status}" -eq 0 ]
+}

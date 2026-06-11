@@ -111,6 +111,25 @@ linear:
   seed:
     scope: team   # workspace | team   (default: team)
 
+  # Author attribution (010) — OPT-IN, default OFF. When absent or
+  # `enabled: false`, behaviour is byte-for-byte today's: Issues are
+  # assigned to the operator (FR-034) and carry no author label. Enable to
+  # make each spec Issue reflect who AUTHORED the spec: an account-
+  # independent `author:<handle>` label (always) plus the author as assignee
+  # on create when they map to a Linear member (manual reassignment is never
+  # overwritten). A non-member / unknown author ⇒ labelled but UNASSIGNED
+  # (never the operator). Author = a `**Owner:**`/`**Author:**` line in
+  # spec.md, else the first git author to add the spec dir. Members are
+  # matched automatically by email; the optional gitignored
+  # linear-authors.local.yml only aliases git≠Linear emails or pins handles.
+  # attribution:
+  #   enabled: true
+  #   assignee: true            # author assignee on create when resolvable
+  #   label: true               # stamp author:<handle>
+  #   author_source: [owner_line, git_first_add]   # resolution order
+  #   authors_file: linear-authors.local.yml        # optional override (gitignored)
+  #   subissue_label: false     # inherit author label onto task-phase sub-issues
+
 # Behavior toggles — operator-tweakable.
 sync:
   enabled: true              # If false, /speckit-* hooks skip Linear writes;
