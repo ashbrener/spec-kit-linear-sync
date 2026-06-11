@@ -1,0 +1,26 @@
+# Dependabot configuration.
+#
+# This is a Bash extension (no language package manifest — no package.json /
+# requirements.txt / go.mod), so the only ecosystem with trackable dependencies
+# is the GitHub Actions used by CI (.github/workflows/). Dependabot keeps those
+# action versions current (e.g. actions/checkout, actions/cache,
+# actions/setup-node) and opens a PR when a new major/minor is published.
+#
+# NOTE on consumer repos: this does NOT track the spec-kit-linear-sync
+# *extension* itself in repos that install it — extensions are added via
+# `specify extension add`, not a package manifest, so no dependency manager
+# (Dependabot or Renovate) sees them. Consumers update via `specify extension
+# upgrade`. See CONTRIBUTING.md → "Releasing & updating the community catalog".
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(ci)"
+    labels:
+      - "dependencies"
+      - "github-actions"
