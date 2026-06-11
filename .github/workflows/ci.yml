@@ -303,7 +303,7 @@ jobs:
       # runner images.
       - name: Cache bats-core
         id: cache-bats
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/bats
           # Bump this key when bumping the pinned version below. Cache is
@@ -328,7 +328,7 @@ jobs:
       # for why Homebrew can't help with pinned 4.4 / 5.2 on macOS.
       - name: Cache bash ${{ matrix.bash_version }} build
         id: cache-bash
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.local/bash-${{ matrix.bash_version }}
           # Cache key includes OS — ELF and Mach-O binaries are not portable.
