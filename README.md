@@ -147,6 +147,7 @@ Spec-kit artifacts map to Linear primitives one-to-one:
 | Each `## D<N>`/`## R<N>` decision block in `research.md` | **ADR comment** on the spec Issue, one per decision (id, title, status, decision, rationale, alternatives, source) — idempotent and updated in place when the decision changes (spec 008) |
 | Branch / worktree / last-touched / current task | **Memory block** — a markdown table in the spec Issue's description, fully bridge-owned (rewritten every reconcile per FR-004). Operator annotations go in Linear **comments**, never the description body. |
 | Optional `[N]` Fibonacci marker on a task line | Per-phase sum → sub-issue `estimate`; spec-level sum → spec Issue `estimate` (FR-035) |
+| Spec author (opt-in) | `author:<handle>` **label** on the spec Issue, plus the author as **assignee** on create when they're a Linear member (spec 010 — see [Author attribution](#author-attribution-optional)) |
 
 Lifecycle phases on the spec Issue's workflow state:
 
@@ -257,6 +258,56 @@ Initiative and Project artifacts written by the bridge carry a
 reconciler uses this marker for idempotent re-matching across renames — if you
 rename the Initiative or Project in Linear's UI, the bridge still finds the
 correct artifact on the next reconcile. Do not delete that line.
+
+## Author attribution (optional)
+
+> **Status:** opt-in / newer feature (spec 010). Default OFF — doing nothing
+> changes nothing. Validate on a test workspace before enabling in production.
+
+By default the bridge assigns every spec Issue (and its sub-issues) to the
+**operator** — the person whose key ran the sync (FR-034). On a shared install
+that means every spec shows one person. Enable **author attribution** to make the
+board reflect **who authored each spec** instead.
+
+Two independent tracks, both opt-in:
+
+- **`author:<handle>` label** — always stamped, account-independent (works for
+  authors with no Linear account).
+- **Assignee** — the spec Issue is assigned to the author **on create**, but only
+  when the author maps to a Linear member. A manual reassignment in Linear is
+  never overwritten. A non-member / unresolved author is **labelled but left
+  unassigned** — a neutral mirror, never the operator.
+
+Enable it in `linear-config.yml`:
+
+```yaml
+linear:
+  attribution:
+    enabled: true        # master switch (default false)
+    assignee: true       # assign the author on create (members only)
+    label: true          # stamp author:<handle>
+    # author_source: [owner_line, git_first_add]   # resolution order
+    # authors_file: linear-authors.local.yml        # optional override (gitignored)
+    # subissue_label: false   # also tag sub-issues with the author label
+```
+
+**How the author is resolved** (per spec): an explicit `**Owner:**` (or
+`**Author:**`) line in `spec.md` wins; otherwise the first person to commit the
+spec directory; otherwise *unknown* (no label, no assignee, no error). A
+`**Owner:** Name <email>` value is normalized to the email.
+
+**Members are matched automatically.** If a spec author's git email matches their
+Linear email, the bridge resolves them against the workspace roster — no config
+needed. Only when a git email differs from a Linear email, or to pin a handle for
+a non-member, do you need the **optional** gitignored
+`.specify/extensions/linear/linear-authors.local.yml` (copy the committed
+`.sample`). That file is **never committed** (the `*.local.yml` rule covers it),
+and the install-time identity-leak guard refuses to let real emails / user ids
+land in any tracked file. The label always carries a handle, never a raw email.
+
+Disabled or absent ⇒ byte-for-byte today's behaviour. Re-running is zero-churn;
+the author label is strip-and-set, the assignee is create-only. Parity-locked
+with the spec-kit-jira author-attribution feature at the user-visible level.
 
 ## The hard-and-fast rule: filesystem wins every conflict
 

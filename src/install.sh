@@ -72,6 +72,9 @@ readonly INSTALL_CONFIG_DIR=".specify/extensions/linear"
 # operator user_id/name/email so the committed config carries no
 # identity (FR-002, FR-003).
 readonly INSTALL_OPERATOR_LOCAL_PATH=".specify/extensions/linear/linear-operator.local.yml"
+# 010 — optional authors-override file (gitignored, identity-bearing).
+readonly INSTALL_AUTHORS_LOCAL_PATH=".specify/extensions/linear/linear-authors.local.yml"
+readonly INSTALL_AUTHORS_SAMPLE_PATH=".specify/extensions/linear/linear-authors.local.yml.sample"
 readonly INSTALL_EXTENSIONS_YML=".specify/extensions.yml"
 # Resolved at runtime by install::check_repo_layout (FR-033). NOT a readonly
 # constant: hardcoding `.git/hooks` is wrong in a linked git worktree, where
@@ -1479,6 +1482,39 @@ install::_write_operator_local_file() {
     install::_log_info "wrote operator-local identity to ${INSTALL_OPERATOR_LOCAL_PATH}"
 }
 
+# install::_scaffold_authors_sample  (010 — author attribution)
+#
+# Drop the OPTIONAL authors-override `.sample` (placeholder content only)
+# next to the operator-local file so an operator who enables attribution has
+# a template to copy to `linear-authors.local.yml`. Idempotent: never
+# overwrites an existing sample. Inline-written, mirroring
+# install::_write_operator_local_file (analyze A1 — consistent with the
+# operator file's scaffolding approach). The real file (without `.sample`)
+# is gitignored by the same `*.local.yml` glob and is never created here.
+install::_scaffold_authors_sample() {
+    if [[ -e "$INSTALL_AUTHORS_SAMPLE_PATH" ]]; then
+        return 0
+    fi
+    mkdir -p "$INSTALL_CONFIG_DIR"
+    {
+        printf '# spec-kit-linear — authors override SAMPLE (010 author attribution).\n'
+        printf '# OPTIONAL. Copy to linear-authors.local.yml (gitignored, NEVER COMMIT)\n'
+        printf '# only when you need to alias a git email that differs from a Linear\n'
+        printf '# email, or to pin a handle for a non-member. Members whose git email\n'
+        printf '# matches their Linear email resolve automatically — no entry needed.\n'
+        printf '# linear_user_id null = known author with no Linear account (label only).\n'
+        printf 'schema_version: 1\n'
+        printf 'authors:\n'
+        printf '  alice@example.com:\n'
+        printf '    handle: alice\n'
+        printf '    linear_user_id: "00000000-0000-0000-0000-000000000000"\n'
+        printf '  contractor@example.com:\n'
+        printf '    handle: contractor\n'
+        printf '    linear_user_id: null\n'
+    } > "$INSTALL_AUTHORS_SAMPLE_PATH"
+    install::_log_info "wrote authors-override sample to ${INSTALL_AUTHORS_SAMPLE_PATH} (copy to *.local.yml to use)"
+}
+
 # install::_ensure_operator_local_gitignored  (spec 004, FR-003)
 #
 # Guarantee `.specify/extensions/linear/*.local.yml` is in `.gitignore`,
@@ -1558,6 +1594,10 @@ install::assert_no_identity_leak() {
         [[ -z "$f" ]] && continue
         # Skip the operator-local file itself (handled separately).
         [[ "$f" == "$op_local" ]] && continue
+        # Skip the authors-override .sample: it ships placeholder
+        # example.com addresses by design (010). The real authors file is
+        # gitignored and flagged separately above if force-tracked.
+        [[ "$f" == "$INSTALL_AUTHORS_SAMPLE_PATH" ]] && continue
         # Binary-safe email scan.
         if grep -IiqE -- "$email_re" "$f" 2>/dev/null; then
             leak_files+="  ${f} (email-shaped string)"$'\n'
@@ -1582,6 +1622,16 @@ install::assert_no_identity_leak() {
     # gitignored; if tracked, identity is leaking regardless of content).
     if git ls-files --error-unmatch "$op_local" >/dev/null 2>&1; then
         leak_files+="  ${op_local} (operator-local identity file is TRACKED — must be gitignored)"$'\n'
+        had_leak=1
+    fi
+
+    # 010 — same rule for the optional authors-override file: it is
+    # identity-bearing (emails + Linear user ids) and gitignored by the same
+    # `*.local.yml` glob; a TRACKED (force-added) copy leaks regardless of
+    # content. The `.sample` is the only authors artifact allowed in the tree
+    # (placeholders only; the email scan above tolerates example.com).
+    if git ls-files --error-unmatch "$INSTALL_AUTHORS_LOCAL_PATH" >/dev/null 2>&1; then
+        leak_files+="  ${INSTALL_AUTHORS_LOCAL_PATH} (authors-override identity file is TRACKED — must be gitignored)"$'\n'
         had_leak=1
     fi
 
@@ -3511,6 +3561,12 @@ install::main() {
     install::_write_operator_local_file
     if [[ -e "$INSTALL_OPERATOR_LOCAL_PATH" ]]; then
         summary::add "created" "operator-local identity at ${INSTALL_OPERATOR_LOCAL_PATH} (gitignored)"
+    fi
+
+    # ---- 010: scaffold the OPTIONAL authors-override sample ---------------
+    install::_scaffold_authors_sample
+    if [[ -e "$INSTALL_AUTHORS_SAMPLE_PATH" ]]; then
+        summary::add "created" "authors-override sample at ${INSTALL_AUTHORS_SAMPLE_PATH} (copy to *.local.yml to enable attribution overrides)"
     fi
 
     # ---- spec 004 hardening: consumer-side identity-leak guard ------------

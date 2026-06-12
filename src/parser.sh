@@ -14,6 +14,9 @@
 #   parser::malformed_task_lines <tasks_md_path>
 #   parser::clarify_sessions <spec_md_path>
 #   parser::clarify_session_bullets <spec_md_path> <date>
+#   parser::spec_owner_line <spec_md_path>            (010 — author attribution)
+#   parser::spec_git_first_author <spec_dir>          (010)
+#   parser::resolve_author <spec_dir> [<spec_md>]     (010)
 #
 # Implements the filesystem-side parser invariants documented in
 # specs/001-spec-kit-linear-bridge/data-model.md §2.3-2.4 and the
@@ -587,6 +590,93 @@ parser::plan_branch() {
         ''|'['*) return 0 ;;
     esac
     printf '%s' "$br"
+}
+
+# ---------------------------------------------------------------------------
+# parser::spec_owner_line <spec_md_path>   (010 FR-001 / research D2)
+#
+# Echo the value of the first `**Owner:**` / `**Author:**` line in spec.md,
+# trimmed. Tolerates both bold-markup placements (`**Owner:**` and
+# `**Owner**:`) and an optional leading list marker. Empty when absent.
+# Account-independent authorship override. Pure; reads one file. No
+# gawk-isms (BSD awk safe — explicit [Oo]/[Aa] alternation, no IGNORECASE).
+# ---------------------------------------------------------------------------
+parser::spec_owner_line() {
+    local spec_md="$1"
+    [[ -f "$spec_md" ]] || return 0
+    awk '
+        {
+            line = $0
+            sub(/^[[:space:]]*[-*][[:space:]]+/, "", line)   # drop a list marker
+            if (line ~ /^\*\*([Oo]wner|[Aa]uthor):?\*\*:?[[:space:]]*/) {
+                val = line
+                sub(/^\*\*([Oo]wner|[Aa]uthor):?\*\*:?[[:space:]]*/, "", val)
+                sub(/[[:space:]]+$/, "", val)
+                if (val != "") { print val; exit }
+            }
+        }
+    ' "$spec_md"
+}
+
+# ---------------------------------------------------------------------------
+# parser::spec_git_first_author <spec_dir>   (010 FR-001)
+#
+# Echo the email of the FIRST git author to add the spec directory, or
+# empty when there is no history / the dir is untracked / not a git repo.
+# Graceful: never aborts the caller (captured so SIGPIPE from head and a
+# non-repo both degrade to empty). Filesystem-evident (Principle I/II) —
+# attributes a spec to its originator, deterministic across clones.
+# ---------------------------------------------------------------------------
+parser::spec_git_first_author() {
+    local spec_dir="${1%/}"
+    [[ -n "$spec_dir" ]] || return 0
+    local email
+    email="$(git log --diff-filter=A --reverse --format='%ae' -- "$spec_dir" 2>/dev/null | head -1)" || email=""
+    printf '%s' "$email"
+}
+
+# ---------------------------------------------------------------------------
+# parser::resolve_author <spec_dir> [<spec_md>]   (010 FR-001 / D1 / U1)
+#
+# Resolve one author per spec in priority order (config-driven, default
+# `owner_line git_first_add`): first source yielding a non-empty identity
+# wins. Emits `<identity>\t<source>` with source ∈ {owner_line,
+# git_first_add}; emits `\tunknown` (empty identity) when none resolves.
+# A `Name <email>` owner value is normalized down to the bare <email>
+# (analyze U1) so roster match + handle derivation receive a clean email.
+# Reads the source order defensively (works without config.sh loaded).
+# ---------------------------------------------------------------------------
+parser::resolve_author() {
+    local spec_dir="${1%/}"
+    local spec_md="${2:-${spec_dir}/spec.md}"
+    local order=""
+    if declare -F config::attribution_source_order >/dev/null 2>&1; then
+        order="$(config::attribution_source_order 2>/dev/null)" || order=""
+    fi
+    [[ -n "$order" ]] || order="owner_line git_first_add"
+
+    local identity="" source="unknown" src
+    for src in $order; do
+        case "$src" in
+            owner_line)
+                identity="$(parser::spec_owner_line "$spec_md")"
+                [[ -n "$identity" ]] && { source="owner_line"; break; }
+                ;;
+            git_first_add)
+                identity="$(parser::spec_git_first_author "$spec_dir")"
+                [[ -n "$identity" ]] && { source="git_first_add"; break; }
+                ;;
+        esac
+    done
+
+    # Normalize `Name <email>` → `email` (U1 / D2); a bare email or handle
+    # passes through verbatim.
+    if [[ "$identity" == *'<'*'@'*'>'* ]]; then
+        identity="${identity##*<}"
+        identity="${identity%%>*}"
+    fi
+
+    printf '%s\t%s' "$identity" "$source"
 }
 
 # ---------------------------------------------------------------------------

@@ -67,6 +67,23 @@ declare -g CONFIG_OPERATOR_LOADED_PATH=""
 # `*.local.yml` suffix is matched by a single `.gitignore` glob.
 readonly CONFIG_OPERATOR_LOCAL_PATH_DEFAULT=".specify/extensions/linear/linear-operator.local.yml"
 
+# ---------------------------------------------------------------------------
+# Authors override store (010 — author attribution). OPTIONAL, gitignored,
+# modelled on the operator-local split above: maps a git author email (or a
+# bare handle) to an explicit handle and/or Linear user id. Two arrays keyed
+# by the lowercased email/handle. `linear_user_id: null`/absent ⇒ known
+# author with no Linear account (label only). Never committed (the
+# `*.local.yml` glob covers it); only a `.sample` ships.
+# ---------------------------------------------------------------------------
+# shellcheck disable=SC2034  # consumed cross-module by reconcile.sh
+# (_resolve_author_user / _author_handle), not within config.sh.
+declare -gA CONFIG_AUTHORS_HANDLE=()
+# shellcheck disable=SC2034  # consumed cross-module by reconcile.sh.
+declare -gA CONFIG_AUTHORS_USER_ID=()
+# shellcheck disable=SC2034  # diagnostic-only, parallels CONFIG_OPERATOR_LOADED_PATH.
+declare -g CONFIG_AUTHORS_LOADED_PATH=""
+readonly CONFIG_AUTHORS_LOCAL_PATH_DEFAULT=".specify/extensions/linear/linear-authors.local.yml"
+
 # One-shot latch so the legacy-config migration notice (FR-007) is
 # emitted at most once per process. Idempotency across PROCESSES is
 # guaranteed structurally: the migration removes the `operator:` block
@@ -342,6 +359,15 @@ hint: copy config-template.yml to ${path} and run \`/spec-kit-linear-install\` t
     # spec 004 — load the operator-local identity store (env → file
     # cascade is applied at getter time). Absent file is a no-op.
     config::_load_operator_file
+
+    # 010 — load the OPTIONAL authors-override store, but only when
+    # attribution is enabled (a disabled install does zero extra work,
+    # preserving the byte-for-byte default-OFF guarantee). Absent file is
+    # a graceful no-op even when enabled.
+    if config::attribution_enabled; then
+        # shellcheck disable=SC2119  # intentional: default path arg via getter.
+        config::load_authors_override
+    fi
 }
 
 # config::_load_operator_file [path]
@@ -562,6 +588,121 @@ config::get_operator_email() {
         return 0
     fi
     printf '%s\n' "${CONFIG_OPERATOR_VALUES[operator.email]:-}"
+}
+
+# ===========================================================================
+# 010 — author attribution config (additive `linear.attribution.*`,
+# default OFF). Every accessor is absent-safe: a config with no
+# `attribution:` block returns the default, so an existing install behaves
+# byte-for-byte as today (FR-015 / SC-005). Boolean accessors return 0/1;
+# value accessors echo.
+# ===========================================================================
+
+# config::attribution_enabled — master switch (default false). Return 0 iff on.
+config::attribution_enabled() {
+    config::_require_loaded
+    [[ "${CONFIG_VALUES[linear.attribution.enabled]:-false}" == "true" ]]
+}
+
+# config::attribution_assignee — set author assignee on create when resolvable
+# (default true). Only consulted when attribution_enabled.
+config::attribution_assignee() {
+    config::_require_loaded
+    [[ "${CONFIG_VALUES[linear.attribution.assignee]:-true}" == "true" ]]
+}
+
+# config::attribution_label — stamp author:<handle> (default true).
+config::attribution_label() {
+    config::_require_loaded
+    [[ "${CONFIG_VALUES[linear.attribution.label]:-true}" == "true" ]]
+}
+
+# config::attribution_subissue_label — inherit author label onto sub-issues
+# (default false). Sub-issues never receive the author assignee (FR-013).
+config::attribution_subissue_label() {
+    config::_require_loaded
+    [[ "${CONFIG_VALUES[linear.attribution.subissue_label]:-false}" == "true" ]]
+}
+
+# config::attribution_source_order — echo the space-separated resolution
+# order (list `linear.attribution.author_source`), default
+# `owner_line git_first_add`.
+config::attribution_source_order() {
+    config::_require_loaded
+    local -a out=()
+    local i=0
+    while [[ -n "${CONFIG_VALUES[linear.attribution.author_source.${i}]:-}" ]]; do
+        out+=("${CONFIG_VALUES[linear.attribution.author_source.${i}]}")
+        i=$(( i + 1 ))
+    done
+    if (( ${#out[@]} == 0 )); then
+        printf 'owner_line git_first_add'
+        return 0
+    fi
+    printf '%s' "${out[*]}"
+}
+
+# config::authors_file_path — echo the resolved authors-override path
+# (relative names are anchored under .specify/extensions/linear/).
+config::authors_file_path() {
+    config::_require_loaded
+    local p="${CONFIG_VALUES[linear.attribution.authors_file]:-}"
+    if [[ -z "$p" ]]; then
+        p="${CONFIG_AUTHORS_LOCAL_PATH_DEFAULT}"
+    elif [[ "$p" != /* ]]; then
+        p=".specify/extensions/linear/${p}"
+    fi
+    printf '%s' "$p"
+}
+
+# config::load_authors_override [path]
+# Parse the OPTIONAL gitignored authors-override file into
+# CONFIG_AUTHORS_HANDLE / CONFIG_AUTHORS_USER_ID, keyed by lowercased
+# email/handle. Absent file ⇒ graceful no-op (dynamic roster still
+# resolves members). Email keys contain dots, so we strip the known
+# `.handle` / `.linear_user_id` suffix rather than splitting on dots.
+# shellcheck disable=SC2120  # the optional [path] arg is intentional
+# (exercised by unit tests); no runtime caller passes one, which is fine.
+config::load_authors_override() {
+    local path="${1:-}"
+    [[ -n "$path" ]] || path="$(config::authors_file_path)"
+
+    CONFIG_AUTHORS_HANDLE=()
+    CONFIG_AUTHORS_USER_ID=()
+    CONFIG_AUTHORS_LOADED_PATH=""
+
+    [[ -e "$path" ]] || return 0
+    if [[ ! -r "$path" ]]; then
+        config::_warn "authors override not readable: ${path} (continuing without it)"
+        return 0
+    fi
+
+    local -A _authors=()
+    config::_parse_file "$path" _authors
+    # shellcheck disable=SC2034  # read cross-module / diagnostic-only.
+    CONFIG_AUTHORS_LOADED_PATH="$path"
+
+    local k email lc val
+    for k in "${!_authors[@]}"; do
+        case "$k" in
+            authors.*.handle)
+                email="${k#authors.}"; email="${email%.handle}"
+                lc="${email,,}"
+                # shellcheck disable=SC2034  # consumed by reconcile.sh.
+                CONFIG_AUTHORS_HANDLE["$lc"]="${_authors[$k]}"
+                ;;
+            authors.*.linear_user_id)
+                email="${k#authors.}"; email="${email%.linear_user_id}"
+                lc="${email,,}"
+                val="${_authors[$k]}"
+                # Record the entry even when null so a bare-handle-only or
+                # null user_id still marks the author as "override-governed"
+                # (non-member ⇒ label only). Empty/null both mean no assignee.
+                # shellcheck disable=SC2034  # consumed by reconcile.sh.
+                CONFIG_AUTHORS_USER_ID["$lc"]="$val"
+                ;;
+        esac
+    done
 }
 
 # config::get_workflow_state_uuid <lifecycle_phase>

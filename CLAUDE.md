@@ -6,12 +6,17 @@ shell commands, and other important information, read the current plan
 <!-- Everything below is OUTSIDE the SPECKIT-managed block on purpose, so
      `specify integration upgrade` cannot overwrite it. Keep project rules here. -->
 
-The current plan is `specs/008-adr-mirroring/plan.md` (ADR / decision-record
-mirroring — mirror each spec's research.md Decision/Rationale/Alternatives blocks
-as at-most-once, update-in-place comments on the spec's Linear Issue; a near-clone
-of the clarify-comment path, parity-locked with the spec-kit-jira ADR feature; no
-config/schema change). It builds on `specs/007-configurable-mapping/plan.md`
-(configurable mapping, resolves #17) and the earlier shipped baselines.
+The current plan is `specs/010-author-attribution/plan.md` (author-based
+attribution — reflect who authored each spec on its Linear Issue via an
+account-independent `author:<handle>` label plus an author assignee on create
+when resolvable; opt-in `linear.attribution.*`, default OFF; re-points the
+FR-034 create-time assignee and clones the `phase:*` label strip-and-set;
+author resolved from a `spec.md` `Owner:` line then git first-add; author→user
+mapping is dynamic via the Linear `users` roster with an optional gitignored
+`linear-authors.local.yml`; parity-locked with the spec-kit-jira author-
+attribution feature at the user-visible level). It builds on
+`specs/008-adr-mirroring/plan.md` (ADR / decision-record mirroring) and
+`specs/007-configurable-mapping/plan.md` (configurable mapping, resolves #17).
 It builds on the shipped baselines: `specs/006-faithful-projection/plan.md`,
 `specs/005-team-scoped-seeding/plan.md`, `specs/004-config-identity-split/plan.md`,
 the drift-aware write-authority redesign at `specs/003-drift-aware-authority/plan.md`,
