@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] — 2026-06-12 — Author attribution, ADR mirroring, identity hardening
+
+Three additive, spec-driven features (specs 008/010 + the #69 hardening) plus
+Dependabot. `extension.id` stays `linear`; the command surface is unchanged;
+every existing install behaves identically until it opts in. All safety
+guarantees (idempotency, drift-awareness, fail-closed writes) hold.
+
 ### Author-based attribution — spec 010
 
 - **The board shows who authored each spec.** Opt-in (`linear.attribution.*`,
@@ -49,6 +56,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Parity** with the spec-kit-jira ADR feature: the user-visible comment shape
   matches across both sinks. No config/schema change; `extension.id` stays
   `linear`.
+
+### Consumer identity-leak hardening (#69)
+
+- **Install refuses to let your identity reach a tracked file.** A new install-
+  time guard (`install::assert_no_identity_leak`) scans the consumer's tracked
+  tree for operator-identity leaks — `operator.*` keys, email-shaped strings, and
+  a force-tracked operator-local / authors-override file — and surfaces a loud,
+  named warning with remediation (Principle VIII). Export
+  `SPECKIT_LINEAR_STRICT_IDENTITY=1` to make a detected leak fail the install.
+  Reinforces the spec-004 config/identity split: identity stays in the gitignored
+  operator-local file, never in committed config.
+
+### Tooling — Dependabot (#64–#67)
+
+- **Dependabot for GitHub Actions (#64)** keeps the CI action pins current; the
+  first batch bumped `actions/checkout`, `actions/cache`, and `actions/setup-node`
+  (#65–#67). CI-internal only; no consumer-facing change.
 
 ## [0.4.0] — 2026-06-10 — Configurable artifact mapping (#17) + lifecycle fixes
 
