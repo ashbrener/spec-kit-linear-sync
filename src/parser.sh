@@ -17,6 +17,7 @@
 #   parser::spec_owner_line <spec_md_path>            (010 — author attribution)
 #   parser::spec_git_first_author <spec_dir>          (010)
 #   parser::resolve_author <spec_dir> [<spec_md>]     (010)
+#   parser::spec_h1_name <spec_md_path>               (012 — readable titles)
 #
 # Implements the filesystem-side parser invariants documented in
 # specs/001-spec-kit-linear-bridge/data-model.md §2.3-2.4 and the
@@ -677,6 +678,29 @@ parser::resolve_author() {
     fi
 
     printf '%s\t%s' "$identity" "$source"
+}
+
+# ---------------------------------------------------------------------------
+# parser::spec_h1_name <spec_md_path>   (012 — readable titles, FR-002 / D3)
+#
+# Echo the human feature name from the spec's first-line H1 of the form
+# `# Feature Specification: <NAME>`, trimmed. Emits EMPTY when the file or
+# heading is absent, the name is empty, or the name is exactly the unfilled
+# `[FEATURE NAME]` placeholder (so callers fall back rather than titling an
+# Issue `[FEATURE NAME]`). Pure md parse; BSD-awk-safe; graceful (no abort).
+# ---------------------------------------------------------------------------
+parser::spec_h1_name() {
+    local spec_md="$1"
+    [[ -f "$spec_md" ]] || return 0
+    awk '
+        /^#[[:space:]]+Feature Specification:/ {
+            name = $0
+            sub(/^#[[:space:]]+Feature Specification:[[:space:]]*/, "", name)
+            sub(/[[:space:]]+$/, "", name)
+            if (name != "" && name != "[FEATURE NAME]") { print name }
+            exit
+        }
+    ' "$spec_md"
 }
 
 # ---------------------------------------------------------------------------

@@ -137,7 +137,7 @@ Spec-kit artifacts map to Linear primitives one-to-one:
 | Filesystem | Linear primitive |
 |---|---|
 | Consumer repository | **Project** (1 per repo, stamped with the repo's directory name) |
-| Spec (`specs/NNN-feature/`) | **Issue** under that Project, identified by the workspace label `speckit-spec:NNN` (FR-004b) |
+| Spec (`specs/NNN-feature/`) | **Issue** under that Project, titled `<NNN> — <name>` from the spec's `# Feature Specification:` H1 (falling back to the `**Input**:` lede, then the dir slug — spec 012; deterministic, default-on), identified by the workspace label `speckit-spec:NNN` (FR-004b) |
 | Spec content (`Input` + `## Overview` + body) | Inlined into the Issue **description** so the issue is self-contained — size-capped, truncated at a clean boundary when oversized, always with a link to the full spec (v0.3.0, spec [`006-faithful-projection`](./specs/006-faithful-projection/spec.md)). Idempotent: an unchanged spec produces no description churn. |
 | Lifecycle phase (`Specifying` / `Clarifying` / …) | Workflow state on the spec Issue + `phase:*` label |
 | Task phase (`## Phase N <sep> <Name>` block in `tasks.md`) | **Sub-issue** under the spec Issue, with `task-phase:N` label. As of v0.3.0 `push` accepts `:`, `—` (em-dash), `-`, or whitespace after `## Phase N` — all produce the same sub-issue (spec [`006-faithful-projection`](./specs/006-faithful-projection/spec.md)); a `## Phase` line with no extractable number still raises a near-miss warning. |

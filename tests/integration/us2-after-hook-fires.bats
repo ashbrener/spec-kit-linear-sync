@@ -126,13 +126,16 @@ setup() {
     #       parent's label in their parent_id resolution payload)
     # The crucial property is "ONE reconcile pass happened, not two";
     # if the hook fired twice we'd see a second spec-Issue CREATE
-    # (= a SECOND mutation whose body sets `title: "002-multi-phase"`).
+    # (= a SECOND mutation whose body sets the spec Issue's title).
+    # 012: the spec Issue title is now the readable `<NNN> — <H1 name>`
+    # (`002 — Multi-Phase Tasks Fixture`), not the old `002-multi-phase`
+    # slug. Sub-issue titles begin `Phase N — …`, so matching the
+    # `002 — ` prefix still uniquely identifies the spec-Issue create.
     local spec_title_creates
-    spec_title_creates="$(integration::calls_containing '"title":"002-multi-phase"')"
-    # Either implementation embeds the title as `"title":"002-..."` or
-    # `\"title\":\"002-...\"`; accept either escape level.
+    spec_title_creates="$(integration::calls_containing '"title":"002 — Multi-Phase Tasks Fixture"')"
+    # Accept either escape level (`"title":"002 — …"` or `\"title\":\"002 — …\"`).
     local spec_title_creates_escaped
-    spec_title_creates_escaped="$(integration::calls_containing 'title\":\"002-multi-phase')"
+    spec_title_creates_escaped="$(integration::calls_containing 'title\":\"002 — Multi-Phase Tasks Fixture')"
     [ "$(( spec_title_creates + spec_title_creates_escaped ))" -le 2 ]
 
     # ---- summary emitted (FR-023) ----

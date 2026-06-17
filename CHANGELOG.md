@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Human-readable Issue titles — spec 012
+
+- **The board reads like features, not filenames.** Spec Issues are now titled
+  `<NNN> — <name>` (e.g. `006 — Faithful projection`) instead of the directory
+  slug `006-faithful-projection`. The name comes from the spec's
+  `# Feature Specification:` H1; when that's the unfilled `[FEATURE NAME]`
+  placeholder it falls back to the first sentence of the `**Input**:` lede
+  (length-capped to one line), then to the slug as a last resort.
+- **Deterministic + default-on.** The title is derived purely from the spec on
+  disk — no summarization model — so it is identical across hook, manual, and
+  headless-CI reconciles and is zero-churn on re-run. No config, no opt-out: on
+  the first reconcile after upgrade each existing Issue re-titles once
+  (slug → readable), then stays stable. Sub-issue titles, the description, and the
+  `speckit-spec:NNN` identity label are unchanged. Parity-locked with the
+  spec-kit-jira sibling; `extension.id` stays `linear`.
+
 ## [0.5.0] — 2026-06-12 — Author attribution, ADR mirroring, identity hardening
 
 Three additive, spec-driven features (specs 008/010 + the #69 hardening) plus
