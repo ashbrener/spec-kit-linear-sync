@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-06-17 — Human-readable Issue titles
+
+Spec Issues now read like features, not filenames. Additive and default-on;
+`extension.id` stays `linear`; the command surface is unchanged; existing
+installs re-title once on the next reconcile, then stay zero-churn. All safety
+guarantees (idempotency, drift-awareness, fail-closed writes) hold.
+
 ### Human-readable Issue titles — spec 012
 
 - **The board reads like features, not filenames.** Spec Issues are now titled
