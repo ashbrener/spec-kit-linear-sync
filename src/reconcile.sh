@@ -113,6 +113,13 @@ readonly RECONCILE_CONFIG_PATH_DEFAULT=".specify/extensions/linear/linear-config
 # between truncated and untruncated states (FR-013 / SC-005).
 readonly RECONCILE_SPEC_CONTENT_MAX_CHARS=6000
 
+# 012 — human-readable Issue title length cap. The composed title
+# `<NNN> — <human title>` is clamped to this many characters with
+# clean-boundary (word) truncation so it stays a single scannable line in
+# Linear's list/board (FR-004). Deterministic — a function of on-disk bytes
+# only, so an unchanged spec re-titles identically (SC-002/SC-005).
+readonly RECONCILE_SPEC_TITLE_MAX_CHARS=80
+
 # Bridge-owned description policy (FR-004, FR-016): the spec Issue's
 # description body is fully owned and rewritten by the bridge on every
 # reconcile, in canonical order: spec-content → memory. There
@@ -1066,6 +1073,71 @@ EOF
 # or test that still references the old name keeps working.
 reconcile::render_overview_block() {
     reconcile::render_spec_content_block "$@"
+}
+
+# =============================================================================
+# 012 — human-readable Issue title resolution.
+#
+# Compose the spec Issue title `<NNN> — <human title>` deterministically from
+# filesystem content (Principle I; no model — identical in headless CI):
+#   H1 `# Feature Specification: <NAME>` → first sentence of the `**Input**:`
+#   value (`_extract_input`) → the `<NNN>-<slug>` last resort. Clean-boundary
+#   length-capped. Never empty; never `[FEATURE NAME]`.
+# =============================================================================
+
+# reconcile::_first_sentence <text>
+#   Squeeze internal whitespace/newlines to single spaces, trim, and return the
+#   first sentence (cut at the first period-then-space, else the whole line).
+#   Empty input → empty output. Pure-string, deterministic.
+reconcile::_first_sentence() {
+    local text="$1"
+    # Collapse all whitespace runs (incl. newlines) to single spaces, trim ends.
+    text="$(printf '%s' "$text" | tr '\n\t' '  ' | tr -s ' ')"
+    text="${text#"${text%%[![:space:]]*}"}"
+    text="${text%"${text##*[![:space:]]}"}"
+    [[ -n "$text" ]] || return 0
+    # First sentence: up to and including the first ". " boundary, else all.
+    if [[ "$text" == *". "* ]]; then
+        printf '%s' "${text%%. *}"
+    else
+        # Drop a single trailing period for a clean one-clause title.
+        printf '%s' "${text%.}"
+    fi
+}
+
+# reconcile::_compose_spec_title <feature_number> <spec_dir> <short_name>
+#   Resolve the title per 012 FR-001..FR-007. Returns a non-empty, single-line,
+#   length-capped string. The slug last-resort returns today's exact value.
+reconcile::_compose_spec_title() {
+    local feature_number="$1" spec_dir="$2" short_name="$3"
+    local spec_md="${spec_dir%/}/spec.md"
+
+    local name
+    name="$(parser::spec_h1_name "$spec_md")"
+    if [[ -z "$name" ]]; then
+        name="$(reconcile::_first_sentence "$(reconcile::_extract_input "$spec_md" 2>/dev/null)")"
+    fi
+
+    # Last resort: today's slug title, verbatim (no em-dash reshaping).
+    if [[ -z "$name" ]]; then
+        printf '%s-%s' "$feature_number" "$short_name"
+        return 0
+    fi
+
+    local title="${feature_number} — ${name}"
+
+    # Clean-boundary (word) length cap (FR-004). Cut to the cap, back up to the
+    # last space inside the window, append a single ellipsis.
+    if (( ${#title} > RECONCILE_SPEC_TITLE_MAX_CHARS )); then
+        local head="${title:0:RECONCILE_SPEC_TITLE_MAX_CHARS}"
+        if [[ "$head" == *" "* ]]; then
+            head="${head% *}"
+        fi
+        head="${head%"${head##*[![:space:]]}"}"   # trim trailing space
+        title="${head}…"
+    fi
+
+    printf '%s' "$title"
 }
 
 # =============================================================================
@@ -2860,7 +2932,12 @@ reconcile::sync_spec_issue() {
         reconcile::_summarize_author "$feature_number" "$author_identity" "$author_source" "$author_assignee"
     fi
 
-    local title="${feature_number}-${short_name}"
+    # 012: human-readable title `<NNN> — <name>` resolved deterministically
+    # from the spec H1 → first-sentence-of-Input → slug. The create input and
+    # the update-path `current_title != title` diff are unchanged, so an
+    # unchanged spec is zero-churn and an upgrade re-titles once (FR-006/SC-006).
+    local title
+    title="$(reconcile::_compose_spec_title "$feature_number" "$spec_dir" "$short_name")"
 
     # FR-035: roll up [N] markers across all of tasks.md into the spec
     # Issue's Linear estimate field. Empty when NO task carries a

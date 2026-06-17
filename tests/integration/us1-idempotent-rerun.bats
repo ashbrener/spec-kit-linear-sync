@@ -78,8 +78,12 @@ setup() {
     # idempotency probe MUST still skip mutating because the body
     # match also has to pass — but if the test ever sees a save_issue
     # call here, the mutation_count assertion below will catch it.
+    # 012: the GetIssueState diff probe reads `.data.issue.title`; the
+    # readable title for fixture 002 is `002 — Multi-Phase Tasks Fixture`,
+    # so the current-state mock carries it to keep the title leg of the
+    # idempotency diff a no-op.
     integration::stage_response 'query' \
-        "{\"data\":{\"issues\":{\"nodes\":[{\"id\":\"${SPEC_ISSUE_ID}\",\"updatedAt\":\"2026-05-28T00:00:00Z\",\"description\":\"<unchanged>\"}]},\"issue\":{\"blocks\":{\"nodes\":[]}},\"comments\":{\"nodes\":[{\"id\":\"ff000000-0000-4000-0000-000000000001\"}]}}}"
+        "{\"data\":{\"issues\":{\"nodes\":[{\"id\":\"${SPEC_ISSUE_ID}\",\"updatedAt\":\"2026-05-28T00:00:00Z\",\"description\":\"<unchanged>\"}]},\"issue\":{\"title\":\"002 — Multi-Phase Tasks Fixture\",\"blocks\":{\"nodes\":[]}},\"comments\":{\"nodes\":[{\"id\":\"ff000000-0000-4000-0000-000000000001\"}]}}}"
 
     # If any mutation DOES fire (test failure mode), we still want it
     # to return a parseable payload so the reconciler doesn't error

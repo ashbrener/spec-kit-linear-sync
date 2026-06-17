@@ -6,15 +6,15 @@ shell commands, and other important information, read the current plan
 <!-- Everything below is OUTSIDE the SPECKIT-managed block on purpose, so
      `specify integration upgrade` cannot overwrite it. Keep project rules here. -->
 
-The current plan is `specs/010-author-attribution/plan.md` (author-based
-attribution — reflect who authored each spec on its Linear Issue via an
-account-independent `author:<handle>` label plus an author assignee on create
-when resolvable; opt-in `linear.attribution.*`, default OFF; re-points the
-FR-034 create-time assignee and clones the `phase:*` label strip-and-set;
-author resolved from a `spec.md` `Owner:` line then git first-add; author→user
-mapping is dynamic via the Linear `users` roster with an optional gitignored
-`linear-authors.local.yml`; parity-locked with the spec-kit-jira author-
-attribution feature at the user-visible level). It builds on
+The current plan is `specs/012-readable-titles/plan.md` (human-readable Issue
+titles — replace the spec Issue's slug title `<NNN>-<slug>` with a deterministic
+`<NNN> — <human title>` resolved H1 → first-sentence-of-Input → slug; default-on,
+no toggle; no model at sync time (deterministic + idempotent, identical in
+headless CI); one new `parser::spec_h1_name` + a `reconcile::_compose_spec_title`
+reusing `_extract_input` and the existing clean-boundary truncation; swaps the
+single `title=` line in `sync_spec_issue`; sub-issue titles / description /
+identity label untouched; parity-locked with the spec-kit-jira sibling). It
+builds on `specs/010-author-attribution/plan.md` (author attribution),
 `specs/008-adr-mirroring/plan.md` (ADR / decision-record mirroring) and
 `specs/007-configurable-mapping/plan.md` (configurable mapping, resolves #17).
 It builds on the shipped baselines: `specs/006-faithful-projection/plan.md`,
