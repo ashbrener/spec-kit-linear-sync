@@ -1253,6 +1253,23 @@ reconcile::subissue_state_key() {
     fi
 }
 
+# reconcile::_phase_state_key <lifecycle_phase> <tasks_md> <phase_index>
+#   013 (FR-001/FR-002): the workflow-state key for one task-phase sub-issue.
+#   A TERMINAL spec (`ready_to_merge`|`merged`) cascades every phase to `done`,
+#   overriding the checkbox ratio so a merged spec's board reads Done without
+#   manual checkbox hygiene. Any non-terminal phase (incl. an empty/unknown
+#   lifecycle) uses the checkbox-ratio key (`subissue_state_key`, unchanged).
+#   Deterministic ⇒ idempotent (a terminal spec resolves `done` every run).
+reconcile::_phase_state_key() {
+    local lifecycle_phase="$1" tasks_md="$2" phase_index="$3"
+    case "$lifecycle_phase" in
+        ready_to_merge|merged)
+            printf 'done\n' ;;
+        *)
+            reconcile::subissue_state_key "$tasks_md" "$phase_index" ;;
+    esac
+}
+
 # =============================================================================
 # Label name → UUID resolution (the labelIds binding).
 #
@@ -3246,6 +3263,11 @@ reconcile::sync_task_phase_subissues() {
     local spec_issue_id="$1"
     local feature_number="$2"
     local spec_dir="$3"
+    # 013: the spec's inferred lifecycle phase. When terminal
+    # (ready_to_merge|merged) every task-phase sub-issue is driven to Done,
+    # overriding the tasks.md checkbox ratio (FR-001). Empty/non-terminal ⇒
+    # today's checkbox-ratio behaviour (back-compat: a 3-arg caller still works).
+    local lifecycle_phase="${4:-}"
 
     local tasks_md="${spec_dir%/}/tasks.md"
     if [[ ! -f "$tasks_md" ]]; then
@@ -3296,7 +3318,12 @@ reconcile::sync_task_phase_subissues() {
             phase_estimate=""
         fi
         local state_key state_uuid
-        state_key="$(reconcile::subissue_state_key "$tasks_md" "$phase_index")"
+        # 013 cascade (FR-001): a terminal spec (ready_to_merge|merged) drives
+        # every task-phase sub-issue to Done, overriding the checkbox ratio — so
+        # a merged spec's board reads Done without manual checkbox hygiene. This
+        # single key feeds both the create stateId and the update state diff
+        # below, so create and update stay consistent.
+        state_key="$(reconcile::_phase_state_key "$lifecycle_phase" "$tasks_md" "$phase_index")"
         # `default_state_uuids` is added during the post-analyze
         # remediation; if absent, config::get_default_state_uuid halts
         # the script with a clear remediation pointer. We probe via a
@@ -4554,7 +4581,7 @@ reconcile::process_spec() {
     # --- 4d/4e. Task-phase sub-issues (FR-005, FR-006) ----------------
     local phase_map
     if ! phase_map="$(reconcile::sync_task_phase_subissues \
-        "$spec_issue_id" "$feature_number" "$spec_dir")"; then
+        "$spec_issue_id" "$feature_number" "$spec_dir" "$lifecycle_phase")"; then
         summary::add error "spec ${feature_number}: sync_task_phase_subissues failed"
         # Continue to comments — sub-issue failures don't block the
         # rest of the per-spec reconcile per FR-024.
