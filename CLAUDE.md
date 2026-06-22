@@ -6,15 +6,18 @@ shell commands, and other important information, read the current plan
 <!-- Everything below is OUTSIDE the SPECKIT-managed block on purpose, so
      `specify integration upgrade` cannot overwrite it. Keep project rules here. -->
 
-The current plan is `specs/012-readable-titles/plan.md` (human-readable Issue
-titles — replace the spec Issue's slug title `<NNN>-<slug>` with a deterministic
-`<NNN> — <human title>` resolved H1 → first-sentence-of-Input → slug; default-on,
-no toggle; no model at sync time (deterministic + idempotent, identical in
-headless CI); one new `parser::spec_h1_name` + a `reconcile::_compose_spec_title`
-reusing `_extract_input` and the existing clean-boundary truncation; swaps the
-single `title=` line in `sync_spec_issue`; sub-issue titles / description /
-identity label untouched; parity-locked with the spec-kit-jira sibling). It
-builds on `specs/010-author-attribution/plan.md` (author attribution),
+The current plan is `specs/013-subissue-cascade/plan.md` (lifecycle cascade to
+task-phase sub-issues — fix the board lying about merged work: when a spec's
+inferred lifecycle is terminal (`ready_to_merge`/`merged`), force every
+task-phase sub-issue to Done, overriding the tasks.md checkbox ratio (thread
+`lifecycle_phase` into `sync_task_phase_subissues`); and broaden the phase-header
+grammar to accept a single-letter index (`## Phase A —`, separator-gated so
+`## Phase one`/`1Setup` still near-miss), exposing an ordinal (A→1…Z→26, for the
+`task-phase:<ordinal>` label + blocking order + match key) and a display token
+(raw, for the faithful `Phase A — …` sub-issue title). Additive; amends spec-001
+FR-005/FR-013; sub-issue description/mirror unchanged; parity follow-up for the
+jira sibling). It builds on `specs/012-readable-titles/plan.md` (readable Issue
+titles), `specs/010-author-attribution/plan.md` (author attribution),
 `specs/008-adr-mirroring/plan.md` (ADR / decision-record mirroring) and
 `specs/007-configurable-mapping/plan.md` (configurable mapping, resolves #17).
 It builds on the shipped baselines: `specs/006-faithful-projection/plan.md`,

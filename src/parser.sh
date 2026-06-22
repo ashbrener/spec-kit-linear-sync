@@ -44,7 +44,8 @@
 #
 # split_phase_header(line, out) populates the `out` array:
 #   out["ok"]   = 1 if `line` is a parseable phase header, else 0
-#   out["idx"]  = the phase number (digit run) when ok==1
+#   out["idx"]  = the phase ORDINAL when ok==1: a digit run verbatim, or a
+#                 single letter mapped to its alphabet position (A→1 … Z→26, 013)
 #   out["name"] = the trimmed phase name when ok==1 (may be "")
 #
 # Grammar: `^## Phase <N>` where <N> is a digit run, optionally followed
@@ -61,18 +62,30 @@
 # it as a literal keeps the result identical across locales.
 # ---------------------------------------------------------------------------
 readonly PARSER_PHASE_HEADER_AWK='
-    function split_phase_header(line, out,    rest, emdash) {
+    function split_phase_header(line, out,    rest, emdash, tok, pos) {
         out["ok"] = 0
         out["idx"] = ""
         out["name"] = ""
-        # Must start with the literal "## Phase " prefix then a digit run.
-        if (line !~ /^## Phase [0-9]+/) return
+        # Must start with the literal "## Phase " prefix then a digit run
+        # OR a single letter (013: letter-indexed phases like "## Phase A —").
+        if (line !~ /^## Phase ([0-9]+|[A-Za-z])/) return
         rest = line
         sub(/^## Phase /, "", rest)
-        match(rest, /^[0-9]+/)
-        out["idx"] = substr(rest, 1, RLENGTH)
-        rest = substr(rest, RLENGTH + 1)
-        # After the number must come: end-of-line, whitespace, ":", "-",
+        # Index token → ordinal. A digit run keeps its value verbatim
+        # (byte-for-byte back-compat). A SINGLE letter maps to its
+        # case-insensitive alphabet position (A/a=1 … Z/z=26); a letter RUN
+        # ("one", "AB") is rejected by the post-index gate below, so English
+        # words and multi-letter tokens still near-miss (FR-009).
+        if (match(rest, /^[0-9]+/)) {
+            out["idx"] = substr(rest, 1, RLENGTH)
+            rest = substr(rest, RLENGTH + 1)
+        } else {
+            tok = substr(rest, 1, 1)
+            pos = index("ABCDEFGHIJKLMNOPQRSTUVWXYZ", toupper(tok))
+            out["idx"] = pos
+            rest = substr(rest, 2)
+        }
+        # After the index must come: end-of-line, whitespace, ":", "-",
         # or the em-dash. Anything else (e.g. "Setup" glued to the digit)
         # is NOT a phase header.
         emdash = sprintf("%c%c%c", 226, 128, 148)   # U+2014 em-dash, UTF-8

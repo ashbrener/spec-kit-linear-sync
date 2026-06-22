@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Lifecycle cascade to task-phase sub-issues — spec 013
+
+- **The board stops lying about merged work.** When a spec reaches
+  `ready_to_merge` / `merged`, every one of its task-phase sub-issues is driven to
+  **Done** — overriding the `tasks.md` checkbox ratio — so a merged spec's phases
+  read Done without hand-ticking every box. Previously a sub-issue's state came
+  *only* from the checkbox ratio, so merged specs stranded their phases in Todo.
+  Non-terminal specs are unchanged (state still tracks the checkbox ratio). The
+  heal is one-time on the next reconcile, then zero-churn. (Amends FR-005/FR-013.)
+- **Letter-indexed phases now create sub-issues.** The `## Phase N` grammar
+  accepts a single-letter index too (`## Phase A — …`, mapped A→1 … Z→26), so
+  specs that index phases with letters no longer silently produce **zero**
+  sub-issues. The label stays `task-phase:<ordinal>` and the title renders
+  `Phase 1 — …`; numeric specs are byte-identical. Genuinely malformed headers
+  (`## Phase one`, `## Phase 1Setup`) still raise the near-miss warning.
+- Sub-issue **descriptions** (the `tasks.md` checklist mirror) are unchanged —
+  only the workflow state cascades. `extension.id` stays `linear`; no command or
+  hook change. (A parity follow-up applies the same cascade to the spec-kit-jira
+  sibling.)
+
 ## [0.6.0] — 2026-06-17 — Human-readable Issue titles
 
 Spec Issues now read like features, not filenames. Additive and default-on;
