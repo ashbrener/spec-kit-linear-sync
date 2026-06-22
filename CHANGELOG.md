@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-06-22 — Board fidelity: merged-state cascade + letter phases
+
+A high-severity board-fidelity fix (spec 013): merged specs no longer strand
+their task-phase sub-issues in Todo, and letter-indexed phases no longer produce
+zero sub-issues. Recommended upgrade for anyone with merged specs. Additive;
+`extension.id` stays `linear`; no command/hook change; numeric specs are
+byte-identical.
+
 ### Lifecycle cascade to task-phase sub-issues — spec 013
 
 - **The board stops lying about merged work.** When a spec reaches
