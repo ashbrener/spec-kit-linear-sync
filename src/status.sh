@@ -82,6 +82,8 @@ source "${SCRIPT_DIR}/git_helpers.sh"
 source "${SCRIPT_DIR}/summary.sh"
 # shellcheck source=./parser.sh disable=SC1091
 source "${SCRIPT_DIR}/parser.sh"
+# shellcheck source=./hookcheck.sh disable=SC1091
+source "${SCRIPT_DIR}/hookcheck.sh"
 
 # -----------------------------------------------------------------------------
 # Module constants.
@@ -874,6 +876,25 @@ main() {
         json)  status::emit_json ;;
         human) status::emit_human ;;
     esac
+
+    # 014 hook-health — a first-class report line (FR-006). Computed once;
+    # NEVER alters the exit code (clarification 2026-06-24 / R7). Human mode
+    # prints the line to stdout; json mode surfaces it via the structured
+    # summary so the stdout array stays a clean spec-row array.
+    hookcheck::assess_into
+    case "$ARG_FORMAT" in
+        human)
+            hookcheck::status_line "$HOOKCHECK_OVERALL" \
+                "${HOOKCHECK_MISSING[@]}" -- "${HOOKCHECK_DISABLED[@]}"
+            ;;
+        json)
+            summary::add info "$(hookcheck::status_line "$HOOKCHECK_OVERALL" \
+                "${HOOKCHECK_MISSING[@]}" -- "${HOOKCHECK_DISABLED[@]}")"
+            ;;
+    esac
+    # Interactive consented self-heal on the status path too (FR-009);
+    # non-interactive (piped/CI) does nothing. Never changes the exit code.
+    hookcheck::offer_selfheal "$HOOKCHECK_OVERALL" "${HOOKCHECK_MISSING[@]}" || true
 
     summary::emit
     if summary::has_errors; then

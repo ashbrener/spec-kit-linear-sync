@@ -49,6 +49,11 @@
 
 set -euo pipefail
 
+# Idempotent include-guard (014) — safe to source twice (e.g. when the
+# hook self-heal sources install.sh, which re-sources this lib).
+[[ -n "${_GRAPHQL_SH_LOADED:-}" ]] && return 0
+readonly _GRAPHQL_SH_LOADED=1
+
 # ---------------------------------------------------------------------------
 # Module constants
 # ---------------------------------------------------------------------------

@@ -33,6 +33,12 @@
 # module (Principle VIII Rule 1: observable failure surfaces stay at
 # the entry point, not in every library).
 
+# Idempotent include-guard (014) — safe to source twice (e.g. when the hook
+# self-heal sources install.sh, which lazily re-sources this lib). This module
+# is only ever sourced, never executed, so a bare `return` is safe.
+[[ -n "${_PARSER_SH_LOADED:-}" ]] && return 0
+readonly _PARSER_SH_LOADED=1
+
 # ---------------------------------------------------------------------------
 # PARSER_PHASE_HEADER_AWK — shared awk prologue defining split_phase_header().
 #

@@ -37,6 +37,11 @@
 
 set -euo pipefail
 
+# Idempotent include-guard (014) — safe to source twice (e.g. when the
+# hook self-heal sources install.sh, which lazily re-sources this lib).
+[[ -n "${_CONFIG_SH_LOADED:-}" ]] && return 0
+readonly _CONFIG_SH_LOADED=1
+
 # ---------------------------------------------------------------------------
 # Module-level state. All keys are flattened "dotted" paths (e.g.
 # `linear.team.id`, `linear.workflow_state_uuids.specifying`). One

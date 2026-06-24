@@ -76,6 +76,19 @@ Either path registers the `after_*` hooks into your project's `.specify/extensio
 
 If the install reports a vendored `.git/` warning under `.specify/extensions/linear/`, run `rm -rf .specify/extensions/linear/.git` and re-run the install (FR-049). The bridge does not auto-delete that directory — operator consent is required.
 
+### Updating (and restoring hooks after a `--force` update)
+
+Community extensions have no frictionless `specify extension update`, so the update path is a pinned `--from <release-zip> --force` reinstall:
+
+```bash
+# Pin to the latest release tag (replace <X.Y.Z>):
+specify extension add linear \
+  --from https://github.com/ashbrener/spec-kit-linear-sync/releases/download/v<X.Y.Z>/linear-v<X.Y.Z>.zip \
+  --force
+```
+
+> **`--force` strips your `after_*` auto-sync hooks.** The CLI's `--force` reinstall removes the bridge's six `after_*` hook registrations from `.specify/extensions.yml`, so auto-sync silently stops. **After any `--force` update, re-run `/speckit.linear.install`** to re-register them. The bridge also self-reports this: the next `/speckit.linear.push` (or `/speckit.linear.status`) loudly names the missing hooks and points at the same fix, and — in an interactive session — offers to re-register them in place (spec [`014-hook-health`](./specs/014-hook-health/spec.md)).
+
 ## Adopt — the 3 steps every project takes
 
 1. **Run `/speckit.linear.install`.** This is the interactive install ceremony. It resolves your Linear Team UUID (auto-picks if your workspace has one team; prompts otherwise), creates or attaches a Linear Project for this repo, writes the shareable binding to `.specify/extensions/linear/linear-config.yml` (committed so collaborators inherit it), captures your operator identity via Linear's `viewer` query and writes it to the gitignored `.specify/extensions/linear/linear-operator.local.yml`, and optionally installs the GitHub Action layer.
