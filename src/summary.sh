@@ -63,6 +63,11 @@
 
 set -euo pipefail
 
+# Idempotent include-guard (014) — safe to source twice (e.g. when the
+# hook self-heal sources install.sh, which re-sources this lib).
+[[ -n "${_SUMMARY_SH_LOADED:-}" ]] && return 0
+readonly _SUMMARY_SH_LOADED=1
+
 # -----------------------------------------------------------------------------
 # Module-private state. All names share the `_SUMMARY_` prefix so the caller
 # can `set +u` / `set -u` around us without colliding on unset reads.

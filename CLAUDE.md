@@ -6,18 +6,23 @@ shell commands, and other important information, read the current plan
 <!-- Everything below is OUTSIDE the SPECKIT-managed block on purpose, so
      `specify integration upgrade` cannot overwrite it. Keep project rules here. -->
 
-The current plan is `specs/013-subissue-cascade/plan.md` (lifecycle cascade to
-task-phase sub-issues — fix the board lying about merged work: when a spec's
-inferred lifecycle is terminal (`ready_to_merge`/`merged`), force every
-task-phase sub-issue to Done, overriding the tasks.md checkbox ratio (thread
-`lifecycle_phase` into `sync_task_phase_subissues`); and broaden the phase-header
-grammar to accept a single-letter index (`## Phase A —`, separator-gated so
-`## Phase one`/`1Setup` still near-miss), exposing an ordinal (A→1…Z→26, for the
-`task-phase:<ordinal>` label + blocking order + match key) and a display token
-(raw, for the faithful `Phase A — …` sub-issue title). Additive; amends spec-001
-FR-005/FR-013; sub-issue description/mirror unchanged; parity follow-up for the
-jira sibling). It builds on `specs/012-readable-titles/plan.md` (readable Issue
-titles), `specs/010-author-attribution/plan.md` (author attribution),
+The current plan is `specs/014-hook-health/plan.md` (hook self-healing — the
+community `add --from <zip> --force` update path silently strips the bridge's six
+`after_*` auto-sync hooks from `.specify/extensions.yml`, so auto-sync stops and
+the board drifts unnoticed. The bridge now self-reports its own hook health: on
+every `speckit.linear.push` (reconcile) and `speckit.linear.status` it classifies
+each `after_*` hook as present/disabled/absent and, when any are absent, emits a
+single loud once-per-run warning naming the missing hooks + the
+`/speckit.linear.install` remediation; `status` adds a first-class hook-health
+line and never changes its exit code. Interactive runs additionally OFFER a single
+y/N consented self-heal that re-registers all missing hooks at once (reusing
+install's idempotent `register_after_hooks`, preserving `enabled: false`);
+non-interactive runs are warn-only and mutate nothing. Surface-don't-enforce
+(Principle VIII); detection lives in new `src/hookcheck.sh`; additive, no
+constitution amendment; jira-sibling parity is a follow-up). It builds on
+`specs/013-subissue-cascade/plan.md` (lifecycle cascade to task-phase sub-issues +
+single-letter phase grammar A→1…Z→26), `specs/012-readable-titles/plan.md`
+(readable Issue titles), `specs/010-author-attribution/plan.md` (author attribution),
 `specs/008-adr-mirroring/plan.md` (ADR / decision-record mirroring) and
 `specs/007-configurable-mapping/plan.md` (configurable mapping, resolves #17).
 It builds on the shipped baselines: `specs/006-faithful-projection/plan.md`,

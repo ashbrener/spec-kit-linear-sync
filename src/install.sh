@@ -42,6 +42,13 @@
 
 set -euo pipefail
 
+# Idempotent include-guard (014) — safe to source twice. The hook self-heal
+# (src/hookcheck.sh) sources this file to reuse register_after_hooks; reconcile/
+# status have already loaded the shared libs install re-sources. On direct
+# execution the guard is a no-op (the var is unset on first load).
+[[ -n "${_INSTALL_SH_LOADED:-}" ]] && return 0
+readonly _INSTALL_SH_LOADED=1
+
 # -----------------------------------------------------------------------------
 # Module sourcing.
 # Strict order: parser doesn't help us much here, but summary + git_helpers do.

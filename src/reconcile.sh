@@ -89,6 +89,8 @@ source "${SCRIPT_DIR}/git_helpers.sh"
 source "${SCRIPT_DIR}/summary.sh"
 # shellcheck source=./parser.sh disable=SC1091
 source "${SCRIPT_DIR}/parser.sh"
+# shellcheck source=./hookcheck.sh disable=SC1091
+source "${SCRIPT_DIR}/hookcheck.sh"
 
 # -----------------------------------------------------------------------------
 # Module constants
@@ -201,6 +203,12 @@ declare -g _RECONCILE_AGENT_RESOLVED=0
 # lacks an `## Overview` heading so the warning fires once per
 # reconcile rather than once per spec.
 declare -g _RECONCILE_OVERVIEW_WARNED=0
+
+# 014 hook-health warning latch — same one-shot pattern. Flipped the first
+# time hookcheck::warn_once fires so the missing-auto-sync-hooks warning
+# appears at most once per reconcile run (FR-010 / SC-006), even on an
+# `--all` sweep across many specs.
+declare -g _RECONCILE_HOOKS_WARNED=0
 
 # FR-002 Project Status accumulator. Each per-spec process_spec call
 # appends one row (newline-separated): `<lifecycle_phase>\t<last_touched_epoch>`.
@@ -4906,6 +4914,14 @@ reconcile::main() {
     # is RETIRED: writing from any branch is now the default, so there is no
     # "bypass" to count. The one-time deprecation INFO row is emitted up-front
     # in main() right after summary::start instead.
+
+    # Step 4c — 014 hook-health self-report. Runs once per reconcile (latched),
+    # AFTER the writes so it sits near the summary. Surfaces missing `after_*`
+    # auto-sync hooks as a named warning + remediation and, interactively,
+    # offers a consented in-place self-heal. Never blocks (Principle VIII):
+    # any failure inside the check is swallowed so it can never change the
+    # reconcile's exit disposition (SC-003).
+    hookcheck::reconcile_check || true
 
     # Step 5 — summary emission (Principle VIII).
     summary::emit
