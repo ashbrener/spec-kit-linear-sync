@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-06-27 — Hook self-healing: stop silent auto-sync loss
+
+The community update path (`specify extension add linear --from <release-zip>
+--force`) silently strips the bridge's six `after_*` auto-sync hooks from
+`.specify/extensions.yml`, so auto-sync quietly stops and the Linear board drifts
+out of date with no signal. The bridge now self-reports its own hook health.
+Additive; `extension.id` stays `linear`; no command/hook change; no constitution
+amendment.
+
+### Hook self-healing — spec 014
+
+- **Silent auto-sync loss becomes a loud one-command fix.** On every
+  `speckit.linear.push` (reconcile) and `speckit.linear.status`, the bridge
+  classifies each of its six `after_*` hooks as present / disabled / absent. When
+  any are absent, the reconcile emits **one** named warning per run listing the
+  missing hooks and the `/speckit.linear.install` remediation. The warning never
+  blocks the run (surface-don't-enforce, Principle VIII).
+- **`status` reports hook health as a first-class line** — all present / partial
+  (naming the missing hooks) / none registered. It never changes `status`'s exit
+  code (informational, not a CI gate).
+- **Consented in-place self-heal.** In an interactive session, push and status
+  additionally OFFER (operator y/N) to re-register all missing hooks at once,
+  reusing install's idempotent registration (which preserves any hook you set
+  `enabled: false`). Non-interactive runs (CI / hook-fired / no TTY) are
+  warn-only and mutate nothing.
+- **A deliberately disabled hook is never "missing"** and never silently
+  re-enabled (Principle VII).
+- **Docs:** the README now gives the `--from <release-zip> --force` update
+  one-liner plus a note to re-run `/speckit.linear.install` after a `--force`
+  update to restore the hooks — the workaround and the self-report point at the
+  same fix.
+
+### Internal
+
+- New `src/hookcheck.sh` owns detection (an `awk` block-walk that mirrors
+  install's hook grammar, extended to read `enabled:`) and the consented
+  self-heal. Idempotent include-guards were added to the shared libs
+  (`summary`, `git_helpers`, `graphql`, `config`, `parser`, `install`) so the
+  self-heal can source `install.sh` without `readonly` clashes.
+- 25 new unit tests + 9 new integration tests; shellcheck + markdownlint clean.
+
 ## [0.7.0] — 2026-06-22 — Board fidelity: merged-state cascade + letter phases
 
 A high-severity board-fidelity fix (spec 013): merged specs no longer strand
