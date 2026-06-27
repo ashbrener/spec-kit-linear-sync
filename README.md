@@ -81,9 +81,9 @@ If the install reports a vendored `.git/` warning under `.specify/extensions/lin
 Community extensions have no frictionless `specify extension update`, so the update path is a pinned `--from <release-zip> --force` reinstall:
 
 ```bash
-# Pin to the latest release tag (replace <X.Y.Z>):
+# Pin to the latest release tag (replace <X.Y.Z>, e.g. v0.8.0):
 specify extension add linear \
-  --from https://github.com/ashbrener/spec-kit-linear-sync/releases/download/v<X.Y.Z>/linear-v<X.Y.Z>.zip \
+  --from https://github.com/ashbrener/spec-kit-linear-sync/archive/refs/tags/v<X.Y.Z>.zip \
   --force
 ```
 
