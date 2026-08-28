@@ -856,7 +856,7 @@ install::run_dependency_report() {
 
     if (( INSTALL_HAD_HARD_ERROR == 1 )); then
         printf '\nspec-kit-linear: install: dependency report has unresolved errors (✗ rows above).\n' >&2
-        printf '%s\n' "Resolve every ✗ row and re-run \`/spec-kit-linear-install\`." >&2
+        printf '%s\n' "Resolve every ✗ row and re-run \`/speckit-linear-install\`." >&2
         return 1
     fi
     return 0
@@ -1329,7 +1329,7 @@ hint: re-run \`specify extension add linear\` (or pass --dev with a checkout of 
     # T233/T239 — spec 002: populate the linear.team and linear.project
     # informational fields (key, name) when the discovery flow resolved
     # them. The reconciler only reads UUIDs but operator-facing tools
-    # like /spec-kit-linear-status surface the friendly names.
+    # like /speckit-linear-status surface the friendly names.
     install::_write_team_block "$INSTALL_CONFIG_PATH"
     install::_write_project_block "$INSTALL_CONFIG_PATH"
     install::_log_info "wrote ${INSTALL_CONFIG_PATH}"
@@ -2155,7 +2155,7 @@ install::install_github_action() {
 #   (1) default: invoke `src/seed.sh` inline so the same install
 #       invocation leaves a fully-seeded workspace,
 #   (2) defer: complete install but warn that subsequent reconciles
-#       will halt per FR-022 until /spec-kit-linear-seed runs,
+#       will halt per FR-022 until /speckit-linear-seed runs,
 #   (3) non-interactive: halt with the FR-022 error so CI does not
 #       silently leave an unseeded workspace.
 #
@@ -2219,7 +2219,7 @@ install::prompt_seed_run() {
 
     if install::_workspace_is_seeded "$INSTALL_CONFIG_PATH"; then
         install::_log_info "workspace already seeded (workflow_state_uuids populated); skipping seed prompt"
-        summary::add "skipped" "workspace already seeded — no /spec-kit-linear-seed prompt issued"
+        summary::add "skipped" "workspace already seeded — no /speckit-linear-seed prompt issued"
         return 0
     fi
 
@@ -2231,16 +2231,16 @@ install::prompt_seed_run() {
         install::_log_error \
             "workspace unseeded (workflow_state_uuids placeholder zero-UUIDs); --non-interactive cannot prompt"
         install::_log_error \
-            "Run \`bash src/seed.sh --team ${team_uuid}\` (or /spec-kit-linear-seed) before invoking /spec-kit-linear-push (FR-022)"
+            "Run \`bash src/seed.sh --team ${team_uuid}\` (or /speckit-linear-seed) before invoking /speckit-linear-push (FR-022)"
         summary::add "error" \
-            "workspace unseeded (FR-022); run /spec-kit-linear-seed before /spec-kit-linear-push"
+            "workspace unseeded (FR-022); run /speckit-linear-seed before /speckit-linear-push"
         INSTALL_SEED_PROMPT_RESULT=2
         return 1
     fi
 
     # Interactive: prompt the operator. Default is RUN (Enter accepts).
     printf '\n[linear] Linear workspace is unseeded for this repo (no workflow_state_uuids).\n' >&2
-    printf '         Run /spec-kit-linear-seed now? [Y/n] (default: Y, "n" defers per FR-022): ' >&2
+    printf '         Run /speckit-linear-seed now? [Y/n] (default: Y, "n" defers per FR-022): ' >&2
     local choice=""
     if ! IFS= read -r choice; then
         # No stdin (e.g. piped install with no answer) — treat as defer
@@ -2259,16 +2259,16 @@ install::prompt_seed_run() {
             return $?
             ;;
         n|no|defer)
-            install::_log_warn "operator deferred seed (FR-022): /spec-kit-linear-push will halt until /spec-kit-linear-seed runs"
+            install::_log_warn "operator deferred seed (FR-022): /speckit-linear-push will halt until /speckit-linear-seed runs"
             summary::add "warned" \
-                "workspace seed deferred; run /spec-kit-linear-seed before /spec-kit-linear-push (FR-022)"
+                "workspace seed deferred; run /speckit-linear-seed before /speckit-linear-push (FR-022)"
             INSTALL_SEED_PROMPT_RESULT=2
             return 0
             ;;
         *)
             install::_log_warn "unknown seed-prompt choice '${choice}'; treating as defer (FR-022)"
             summary::add "warned" \
-                "workspace seed deferred (unrecognised choice); run /spec-kit-linear-seed before /spec-kit-linear-push (FR-022)"
+                "workspace seed deferred (unrecognised choice); run /speckit-linear-seed before /speckit-linear-push (FR-022)"
             INSTALL_SEED_PROMPT_RESULT=2
             return 0
             ;;
@@ -2301,7 +2301,7 @@ install::_run_seed_inline() {
         return 0
     fi
     install::_log_error "inline seed failed; install will surface the error"
-    summary::add "error" "inline seed failed; re-run /spec-kit-linear-seed manually before /spec-kit-linear-push"
+    summary::add "error" "inline seed failed; re-run /speckit-linear-seed manually before /speckit-linear-push"
     INSTALL_SEED_PROMPT_RESULT=2
     return 1
 }
@@ -3636,17 +3636,17 @@ install::main() {
             1)
                 printf '  1. Seed completed inline — workflow_state_uuids populated.\n'
                 printf '  2. Commit %s.\n' "$INSTALL_CONFIG_PATH"
-                printf '  3. Verify by running /spec-kit-linear-push --dry-run.\n'
+                printf '  3. Verify by running /speckit-linear-push --dry-run.\n'
                 ;;
             2)
-                printf '  1. Run /spec-kit-linear-seed before /spec-kit-linear-push (FR-022).\n'
+                printf '  1. Run /speckit-linear-seed before /speckit-linear-push (FR-022).\n'
                 printf '  2. Commit %s.\n' "$INSTALL_CONFIG_PATH"
-                printf '  3. Verify by running /spec-kit-linear-push --dry-run.\n'
+                printf '  3. Verify by running /speckit-linear-push --dry-run.\n'
                 ;;
             *)
-                printf '  1. Workspace already seeded — skipping /spec-kit-linear-seed.\n'
+                printf '  1. Workspace already seeded — skipping /speckit-linear-seed.\n'
                 printf '  2. Commit %s.\n' "$INSTALL_CONFIG_PATH"
-                printf '  3. Verify by running /spec-kit-linear-push --dry-run.\n'
+                printf '  3. Verify by running /speckit-linear-push --dry-run.\n'
                 ;;
         esac
         # T259 / FR-049: mirror the vendored-`.git/` warning into the

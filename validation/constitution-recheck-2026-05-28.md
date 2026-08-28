@@ -140,7 +140,7 @@ Evidence:
   field with operator-actionable diagnostics.
 - All 9 lifecycle phases enumerated at `src/config.sh:56-66`; getter
   at `src/config.sh:337-364` halts on unknown phase or missing UUID
-  with a `/spec-kit-linear-seed` remediation hint.
+  with a `/speckit-linear-seed` remediation hint.
 - Action reads UUIDs from `.specify/extensions/linear/linear-config.yml`
   at runtime — `templates/github-action.yml:222-237` uses `yq -r` to
   pull `linear.project.id`, `linear.team.id`, and the

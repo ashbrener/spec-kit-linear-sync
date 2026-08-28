@@ -990,7 +990,7 @@ seed::find_template() {
 # seed::ensure_config
 #   Make sure linear-config.yml exists at SEED_CONFIG_PATH. If absent, copy
 #   from the template and surface a warning so the operator knows they need
-#   to run /spec-kit-linear-install next to fill in team + project UUIDs.
+#   to run /speckit-linear-install next to fill in team + project UUIDs.
 seed::ensure_config() {
     if [[ -f "$SEED_CONFIG_PATH" ]]; then
         return 0
@@ -1013,7 +1013,7 @@ seed::ensure_config() {
 
     cp "$template" "$SEED_CONFIG_PATH"
     summary::add warned \
-        "${SEED_CONFIG_PATH} was missing; copied from ${template}. Run /spec-kit-linear-install to fill in linear.team.id and linear.project.id."
+        "${SEED_CONFIG_PATH} was missing; copied from ${template}. Run /speckit-linear-install to fill in linear.team.id and linear.project.id."
 }
 
 # seed::render_workflow_uuid_block <indent>
@@ -1061,7 +1061,7 @@ seed::render_default_state_uuid_block() {
 #   block is always emitted with both keys so reconcile.sh's getter has a
 #   stable lookup target — missing labels surface as the zero placeholder
 #   UUID, which config::get_agent_label_uuid rejects with a remediation
-#   pointer back to /spec-kit-linear-seed.
+#   pointer back to /speckit-linear-seed.
 seed::render_agent_label_uuid_block() {
     local indent="$1"
     local child_indent

@@ -97,7 +97,7 @@ linear:
     claude:         "00000000-0000-0000-0000-000000000000"   # FR-036 — set by seed
     codex:          "00000000-0000-0000-0000-000000000000"   # FR-036 — set by seed
   # Seed scope (spec 005 — team-scoped / non-admin seeding, FR-005).
-  # Controls the breadth at which `/spec-kit-linear-seed` creates labels:
+  # Controls the breadth at which `/speckit-linear-seed` creates labels:
   #   * team      — labels created scoped to the team above (teamId set).
   #                 Needs ONLY team-level permission, so a sub-team owner
   #                 can seed without workspace-admin. THE DEFAULT.
@@ -107,7 +107,7 @@ linear:
   # permission) but already EXISTS, seed ADOPTS it by name and captures
   # its UUID — needing zero create permission. Omitting this block (or the
   # whole `seed:` key) keeps the default `team` so a pre-005 config works
-  # unedited. Override per-run with `/spec-kit-linear-seed --scope <…>`.
+  # unedited. Override per-run with `/speckit-linear-seed --scope <…>`.
   seed:
     scope: team   # workspace | team   (default: team)
 
@@ -158,11 +158,11 @@ git_hooks:
 # How to bootstrap (first install, fresh consumer repo):
 #   1. `specify extension add linear`                 # copies this template
 #   2. `cp config-template.yml linear-config.yml`     # rename for the bridge to find it
-#   3. `/spec-kit-linear-install`                      # fills linear.{team,project}.id,
+#   3. `/speckit-linear-install`                      # fills linear.{team,project}.id,
 #                                                     # scaffolds linear-operator.local.yml
 #                                                     # (gitignored identity), installs
 #                                                     # webhook + git hooks, registers hooks
-#   4. `/spec-kit-linear-seed`                         # creates workflow states + labels,
+#   4. `/speckit-linear-seed`                         # creates workflow states + labels,
 #                                                     # fills workflow_state_uuids
 #   5. Commit `linear-config.yml` (safe — no identity). Sync is now live
 #      (FR-001, FR-004, Principle V). Do NOT commit

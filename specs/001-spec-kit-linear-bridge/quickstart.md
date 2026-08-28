@@ -52,7 +52,7 @@ You also need:
 ```bash
 cd path/to/your/consumer-repo
 specify extension add linear   # copies the extension tree into .specify/extensions/linear/
-/spec-kit-linear-install        # the load-bearing install ceremony — FR-018b
+/speckit-linear-install        # the load-bearing install ceremony — FR-018b
 ```
 
 The install ceremony walks five sub-steps. Exact wording is pinned
@@ -139,7 +139,7 @@ End-state after Step 1:
 ## Step 2 — Seed the Linear workspace (one-shot, per workspace)
 
 ```bash
-/spec-kit-linear-seed
+/speckit-linear-seed
 ```
 
 **Per workspace, not per repo.** If another repo's install already
@@ -196,7 +196,7 @@ final `seed: done in ~Ns`). <!-- confirm during T077 dogfood: exact wall-clock s
 ## Step 3 — First reconcile (sync existing specs OR scaffold for new)
 
 ```bash
-/spec-kit-linear-push
+/speckit-linear-push
 ```
 
 `push` is the single convergent operation (FR-001 / FR-011) — every
@@ -290,7 +290,7 @@ Demonstrate worktree write-authority (FR-025):
 ```bash
 git worktree add ../consumer-repo-main main
 cd ../consumer-repo-main
-/spec-kit-linear-push
+/speckit-linear-push
 ```
 
 Push runs but enters read-only mode for any spec whose feature
@@ -315,7 +315,7 @@ If you skipped Layer E in Step 1:
    gh secret list -R <owner>/<repo> | grep LINEAR_API_TOKEN
    ```
 
-3. **Install the workflow.** Re-run `/spec-kit-linear-install` and
+3. **Install the workflow.** Re-run `/speckit-linear-install` and
    accept the webhook prompt — it drops
    `.github/workflows/spec-kit-linear-sync.yml` and flips
    `webhook.installed: true`. Commit both.
@@ -337,12 +337,12 @@ per SC-011.
 | `Bash 3.2 detected. Install bash >= 4.`                                 | `brew install bash`, re-open shell, re-run.                                                                              |
 | `gh: not authenticated.`                                                | `gh auth login`; accept the `repo` scope so the bridge can read PR state for Layer D fallback.                           |
 | `Linear MCP OAuth not present.`                                         | Run `npx -y mcp-remote https://mcp.linear.app/mcp --transport http-only` once to trigger the OAuth browser flow; cached credentials land in `~/.mcp-auth/mcp-remote-*/` and `mcp-remote` will silently refresh them on subsequent runs (per `validation/linear-mcp-runtime-probe.md` §"Path attempted"). |
-| `workspace not seeded — workflow_state_uuids missing for <phase>`       | Run `/spec-kit-linear-seed`. The push halts cleanly per FR-022 — no partial Linear state.                                 |
+| `workspace not seeded — workflow_state_uuids missing for <phase>`       | Run `/speckit-linear-seed`. The push halts cleanly per FR-022 — no partial Linear state.                                 |
 | `Spec NNN has no spec.md. Skipping with warning.`                       | Expected per FR-024. Fix `spec.md` or remove the directory.                                                              |
 | `Two Issues with label speckit-spec:NNN. Kept most recent; archived 1.` | Expected per FR-004b — rare race auto-resolved. Open the archived Issue to copy history out if needed.                   |
 | `Action fired but no LINEAR_API_TOKEN secret.`                          | `gh secret set LINEAR_API_TOKEN -R <owner>/<repo>`. Failed Action runs don't corrupt Linear; Layer D still works.        |
 | `sync: read-only — branch 'main' is not authoritative writer for NNN`   | Expected per FR-025 — switch to a worktree on `NNN-…` to write, or use the read-only view to inspect.                    |
-| `workflow state UUID <id> not found in Linear`                          | Someone deleted the state in Linear's UI. Re-run `/spec-kit-linear-seed` to recreate it and capture a fresh UUID.         |
+| `workflow state UUID <id> not found in Linear`                          | Someone deleted the state in Linear's UI. Re-run `/speckit-linear-seed` to recreate it and capture a fresh UUID.         |
 
 ## Next steps
 

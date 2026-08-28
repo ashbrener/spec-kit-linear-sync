@@ -182,7 +182,7 @@ declare -g _RECONCILE_OPERATOR_WARNED=0
 # "no agent identifier resolved" diagnostic fires exactly once
 # per reconcile run rather than once per Issue created. NOT a
 # warning — absence of an AI agent context is a legitimate
-# operating mode (manual /spec-kit-linear-push invocation from a
+# operating mode (manual /speckit-linear-push invocation from a
 # plain shell, CI worker, etc.), so we only log it at debug level
 # via reconcile::log. The label stamp is silently omitted.
 declare -g _RECONCILE_AGENT_RESOLVED_LOGGED=0
@@ -460,7 +460,7 @@ reconcile::parse_args() {
 reconcile::load_config() {
     local path="${RECONCILE_CONFIG_PATH}"
     if [[ ! -e "$path" ]]; then
-        summary::add error "linear-config.yml not found at ${path}; run /spec-kit-linear-install"
+        summary::add error "linear-config.yml not found at ${path}; run /speckit-linear-install"
         reconcile::promote_exit 2
         return 2
     fi
@@ -674,7 +674,7 @@ reconcile::render_memory_block() {
     # FR-036: append a `Last reconciled by` row when an AI agent is
     # driving the reconcile (CLAUDE_CODE_MODEL / CODEX_MODEL / AGENT_NAME).
     # Empty model ⇒ omit the row entirely so plain-shell reconciles
-    # (manual /spec-kit-linear-push from a worker, CI without an agent
+    # (manual /speckit-linear-push from a worker, CI without an agent
     # identifier) render the memory block unchanged. Co-bound to the
     # existing description idempotency probe upstream: a no-op
     # reconcile by a different agent will NOT mutate just to bump this

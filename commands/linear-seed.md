@@ -88,7 +88,7 @@ Principle II.
 
 | Argument | Default | Meaning |
 |---|---|---|
-| `team` | `linear.team.id` from `linear-config.yml` | UUID of the Linear team to seed. Required only when running before `/spec-kit-linear-install` has populated the per-repo config (e.g. first-time bootstrap, sibling-repo dogfood). |
+| `team` | `linear.team.id` from `linear-config.yml` | UUID of the Linear team to seed. Required only when running before `/speckit-linear-install` has populated the per-repo config (e.g. first-time bootstrap, sibling-repo dogfood). |
 | `dry-run` | false | Log every mutation that WOULD fire; issue none. Also skips the `linear-config.yml` write. Safe inspection mode. |
 | `workspace-only` | false | Run the Linear-side workspace mutations only; do NOT write captured UUIDs back to `linear-config.yml`. Use this when you want to verify the workspace state from a non-bridge-installed context (e.g. dogfood from a sibling repo) without touching this repo's config. |
 
@@ -123,7 +123,7 @@ Default: read team from `linear-config.yml`; full write path.
    - Either `--team UUID` was passed OR the consumer repo's config is
      present at `.specify/extensions/linear/linear-config.yml` with
      a populated `linear.team.id`. If both are missing, surface
-     "Run `/spec-kit-linear-install` first, or pass `--team <UUID>`"
+     "Run `/speckit-linear-install` first, or pass `--team <UUID>`"
      and exit without invoking the seed.
    - `LINEAR_API_KEY` is set in `.env` or the shell environment. The
      seed step is one of the two paths in the bridge that legitimately
@@ -177,7 +177,7 @@ Default: read team from `linear-config.yml`; full write path.
      field in the file verbatim. When the file doesn't yet exist
      (fresh consumer repo, pre-install), the script copies
      `config-template.yml` into place first and warns the operator
-     to run `/spec-kit-linear-install` next to fill in
+     to run `/speckit-linear-install` next to fill in
      `linear.team.id` and `linear.project.id`.
 
 4. **Render the structured summary.** `src/seed.sh` emits a block to
@@ -281,15 +281,15 @@ Default state UUIDs (Todo / In Progress / Done from the team's stock states):
 ```
 
 This view is the load-bearing handoff between seed and reconcile:
-the next `/spec-kit-linear-push` reads these UUIDs from
+the next `/speckit-linear-push` reads these UUIDs from
 `linear-config.yml` and never queries Linear by state name (FR-032 /
 Principle V).
 
 ## When this command fires
 
-- **Operator-driven.** `/spec-kit-linear-seed` from the AI agent
+- **Operator-driven.** `/speckit-linear-seed` from the AI agent
   chat — the canonical adoption path, run once per Linear workspace
-  immediately after `/spec-kit-linear-install`.
+  immediately after `/speckit-linear-install`.
 - **On-demand shell.** `bash src/seed.sh [flags]` — same outcome
   per Principle II / FR-011.
 - **NOT hook-wired.** Seed is one-shot per workspace and must not
@@ -297,9 +297,9 @@ Principle V).
   waste 27 queries per `/speckit-*` invocation without any
   functional benefit.
 
-If the operator runs `/spec-kit-linear-push` against a workspace that
+If the operator runs `/speckit-linear-push` against a workspace that
 has never been seeded, the reconciler halts with exit 2 and
-"Run `/spec-kit-linear-seed` first" (FR-022). Re-running the seed in
+"Run `/speckit-linear-seed` first" (FR-022). Re-running the seed in
 that case completes the missing state and lets the next reconcile
 proceed.
 
@@ -322,7 +322,7 @@ trawling logs:
 
 - `no --team UUID supplied and .specify/extensions/linear/linear-config.yml
   not found` — exit 2. The seed halts before any Linear mutation;
-  the operator runs `/spec-kit-linear-install` (or passes `--team`).
+  the operator runs `/speckit-linear-install` (or passes `--team`).
 - `workflowStates query returned N matches for name='<name>' on team
   <team>; skipping create — operator must disambiguate manually` —
   an operator has manually created a duplicate workflow state with
@@ -345,12 +345,12 @@ trawling logs:
   The operator restores the stock state in Linear or manually
   populates the UUID in the config.
 - `<path> was missing; copied from <template>. Run
-  /spec-kit-linear-install to fill in linear.team.id and
+  /speckit-linear-install to fill in linear.team.id and
   linear.project.id.` — fresh-consumer-repo bootstrap. The seed
   emits the captured workflow-state and default-state UUIDs into the
   copied template, but the operator still has to run
-  `/spec-kit-linear-install` to populate the team + project UUIDs
-  before `/spec-kit-linear-push` will work.
+  `/speckit-linear-install` to populate the team + project UUIDs
+  before `/speckit-linear-push` will work.
 
 ## Related commands
 

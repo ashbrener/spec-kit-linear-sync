@@ -148,9 +148,9 @@ provides:
 - **Skill auto-generation**: When the consumer ran
   `specify init --ai-skills`, extensions.py:836
   `_register_extension_skills()` writes one SKILL.md per command
-  at `.claude/skills/spec-kit-linear-<sub>/SKILL.md`. The dot-name
+  at `.claude/skills/speckit-linear-<sub>/SKILL.md`. The dot-name
   (`speckit.linear.push`) becomes the slash-command form
-  (`/spec-kit-linear-push`) by replacing dots with dashes.
+  (`/speckit-linear-push`) by replacing dots with dashes.
 - **Hook dispatch**: speckit-taskstoissues's Pre/Post-Execution
   blocks (`validation/extension-shape-recon.md` §2) translate
   dot-name → slash-name when firing `EXECUTE_COMMAND` directives.

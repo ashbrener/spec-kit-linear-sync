@@ -24,7 +24,7 @@
 # `closed` events where `merged == false` (drop-closed PRs) are filtered out
 # at the job level — those intentionally leave Linear at its last-known
 # state. The operator can manually move the spec Issue to `cancelled` via
-# `/spec-kit-linear-push` from a worktree if desired (that's Layer D's job).
+# `/speckit-linear-push` from a worktree if desired (that's Layer D's job).
 #
 # WHAT IT DOES NOT DO (constitutional firebreak — Principle III)
 # --------------------------------------------------------------
@@ -83,7 +83,7 @@
 # Linear's `issueUpdate` with the same `stateId` is a no-op when the Issue
 # is already in that state (no activity-log entry written). Re-firing on
 # the same event produces the same Linear state. Running this Action AND
-# then `/spec-kit-linear-push` from a worktree produces the same Linear
+# then `/speckit-linear-push` from a worktree produces the same Linear
 # state. Either layer alone keeps the bridge converging.
 #
 # OBSERVABILITY (Principle VIII)
@@ -211,7 +211,7 @@ jobs:
       #
       # All four are REQUIRED by `contracts/config-schema.json`. Any
       # missing value means the operator forgot to run
-      # `/spec-kit-linear-seed` (or a stale checkout pre-dates the seed).
+      # `/speckit-linear-seed` (or a stale checkout pre-dates the seed).
       # Fail red with the exact remediation command.
       - name: Read linear-config.yml
         id: read_config
@@ -248,12 +248,12 @@ jobs:
           fi
           if [[ -z "$STATE_READY" || "$STATE_READY" == "null" ]]; then
             echo "::error::State 'ready_to_merge' UUID missing in linear.workflow_state_uuids."
-            echo "::error::Run '/spec-kit-linear-seed' to capture workflow-state UUIDs (FR-032)."
+            echo "::error::Run '/speckit-linear-seed' to capture workflow-state UUIDs (FR-032)."
             exit 1
           fi
           if [[ -z "$STATE_MERGED" || "$STATE_MERGED" == "null" ]]; then
             echo "::error::State 'merged' UUID missing in linear.workflow_state_uuids."
-            echo "::error::Run '/spec-kit-linear-seed' to capture workflow-state UUIDs (FR-032)."
+            echo "::error::Run '/speckit-linear-seed' to capture workflow-state UUIDs (FR-032)."
             exit 1
           fi
 
@@ -488,7 +488,7 @@ jobs:
             # A common one: stateId points at a deleted workflow state.
             # The error body will name it ("STATE_NOT_FOUND" or similar);
             # surface the remediation command alongside.
-            echo "::error::If the error is STATE_NOT_FOUND or similar, run '/spec-kit-linear-seed --force' to recreate workflow states and update linear-config.yml."
+            echo "::error::If the error is STATE_NOT_FOUND or similar, run '/speckit-linear-seed --force' to recreate workflow states and update linear-config.yml."
             exit 1
           fi
 
