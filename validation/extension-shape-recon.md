@@ -146,7 +146,7 @@ For an extension with `id: linear`, installing into project root `<repo>/`:
                                         # adds installed: [linear] and any hooks
 ```
 
-And, when project was initialised with `--ai-skills` (Kimi auto-qualifies), `_register_extension_skills()` writes one SKILL.md per command at `<repo>/.claude/skills/spec-kit-linear-<sub>/SKILL.md` — won't overwrite if file exists. Generated frontmatter contains `name: spec-kit-linear-<sub>`, `description` (from command frontmatter, else `"Extension command: ..."`), `metadata.source: extension:linear`, plus integration keys.
+And, when project was initialised with `--ai-skills` (Kimi auto-qualifies), `_register_extension_skills()` writes one SKILL.md per command at `<repo>/.claude/skills/speckit-linear-<sub>/SKILL.md` — won't overwrite if file exists. Generated frontmatter contains `name: speckit-linear-<sub>`, `description` (from command frontmatter, else `"Extension command: ..."`), `metadata.source: extension:linear`, plus integration keys.
 
 ### `.specify/extensions.yml` shape (project-level config, written by HookExecutor)
 
@@ -201,9 +201,9 @@ spec-kit-linear/                                 # repo root (this directory)
 │                                               # specs/, CLAUDE.md, .claude/ from the
 │                                               # copytree into consumer projects
 ├── commands/
-│   ├── linear-push.md                          # /spec-kit-linear-push — convert tasks → Linear issues
-│   ├── linear-pull.md                          # /spec-kit-linear-pull — sync state from Linear (if in spec)
-│   └── linear-status.md                        # /spec-kit-linear-status — show sync state (if in spec)
+│   ├── linear-push.md                          # /speckit-linear-push — convert tasks → Linear issues
+│   ├── linear-pull.md                          # /speckit-linear-pull — sync state from Linear (if in spec)
+│   └── linear-status.md                        # /speckit-linear-status — show sync state (if in spec)
 └── docs/
     └── protocol.md                             # optional extended docs (ignored via .extensionignore)
 ```
@@ -256,13 +256,13 @@ specify extension add linear
 specify extension add --from https://github.com/ashbrener/spec-kit-linear/archive/refs/tags/v0.1.0.zip
 ```
 
-After install, consumer repo gains: `.specify/extensions/linear/` (the full tree), `.specify/extensions/.registry` (JSON, linear entry added), `.specify/extensions.yml` (hook entry if we ship `hooks:`), and — if they used `--ai-skills` at init — `.claude/skills/spec-kit-linear-push/SKILL.md` auto-generated.
+After install, consumer repo gains: `.specify/extensions/linear/` (the full tree), `.specify/extensions/.registry` (JSON, linear entry added), `.specify/extensions.yml` (hook entry if we ship `hooks:`), and — if they used `--ai-skills` at init — `.claude/skills/speckit-linear-push/SKILL.md` auto-generated.
 
 ---
 
 ## 5. Open questions for `/speckit-plan`
 
-1. **Config bootstrap UX.** CLI does NOT copy `config-template.yml → linear-config.yml`. Red-team errors at runtime pointing at the template. Should `/spec-kit-linear-push` do the same, or copy-on-first-run with a confirm prompt?
+1. **Config bootstrap UX.** CLI does NOT copy `config-template.yml → linear-config.yml`. Red-team errors at runtime pointing at the template. Should `/speckit-linear-push` do the same, or copy-on-first-run with a confirm prompt?
 2. **Hook integration scope.** Wire `hooks.after_tasks` as mandatory (`optional: false` — auto-fires on every `/speckit-tasks`), optional (user confirms), or no hook (manual only)? Decides whether the extension mutates the default tasks flow.
 3. **Secrets path.** Linear API needs an OAuth token / API key. ConfigManager supports `local-config.yml` (gitignored) and `SPECKIT_LINEAR_*` env vars (extensions.py:2200-2236). Mandate env, document local-config, or both?
 4. **MCP dependency declaration.** `requires:` only validates `speckit_version`. A Linear MCP dependency has no first-class declaration — must assert at command runtime (like red-team asserts the lens catalog exists).

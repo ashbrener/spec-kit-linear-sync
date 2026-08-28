@@ -51,7 +51,7 @@ worktree without writing. See the contracts:
 [recency-comparison](../specs/003-drift-aware-authority/contracts/recency-comparison.md),
 [drift-detection-graphql](../specs/003-drift-aware-authority/contracts/drift-detection-graphql.md).
 **Layer**: this command implements Layer D. The GitHub Action template
-that ships with `/spec-kit-linear-install` implements Layer E and is
+that ships with `/speckit-linear-install` implements Layer E and is
 out of scope here.
 
 The deterministic work happens in `src/reconcile.sh`; this command is
@@ -96,7 +96,7 @@ Default: `--all`.
      (Intel) is earlier on `PATH` than `/bin/bash`.
    - The consumer repo's config is present at
      `.specify/extensions/linear/linear-config.yml`. If absent,
-     surface "run `/spec-kit-linear-install` first" and exit; do NOT
+     surface "run `/speckit-linear-install` first" and exit; do NOT
      attempt to run the reconciler.
    - `jq` is installed (`command -v jq`). `curl` is installed
      (`command -v curl`). `git` is installed and the working directory
@@ -197,8 +197,8 @@ Default: `--all`.
      warnings list.
    - `2` — workspace config error (per FR-022). The script halted
      before any mutation. Surface the exact remediation the script
-     printed (typically: run `/spec-kit-linear-install` or
-     `/spec-kit-linear-seed`). Do NOT retry automatically.
+     printed (typically: run `/speckit-linear-install` or
+     `/speckit-linear-seed`). Do NOT retry automatically.
    - `3` — transport failure. Linear was unreachable; nothing was
      written. Recommend re-running once network connectivity is
      restored.
@@ -208,7 +208,7 @@ Default: `--all`.
 - **Operator-driven.** `/speckit.linear.push` from the AI agent
   chat — the primary on-demand path for recovery from missed hooks
   and ad-hoc reconcile.
-- **Auto-fired hooks** (post-install via `/spec-kit-linear-install`).
+- **Auto-fired hooks** (post-install via `/speckit-linear-install`).
   Every `/speckit-*` lifecycle command in `.specify/extensions.yml`
   is wired to invoke this command per FR-031.
 - **Local git hooks** (`post-checkout`, `post-commit`, `post-merge`)
@@ -261,7 +261,7 @@ logs:
   unchanged` — the operator (or `on-drift=abort`) chose to skip a
   drifted spec; zero Linear mutation for that spec (FR-057).
 - `linear-config.yml not found at <path>; run
-  /spec-kit-linear-install` — FR-022 halt. Exit code 2.
+  /speckit-linear-install` — FR-022 halt. Exit code 2.
 
 ## Related commands
 

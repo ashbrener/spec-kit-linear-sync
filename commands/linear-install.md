@@ -47,7 +47,7 @@ existing Project UUIDs are not overwritten without operator action.
 **Authority**: this command never mutates Linear (other than the
 optional `--auto-create` Project bootstrap, which is deferred to T077
 dogfood). Workspace seeding (workflow states, labels) is a separate
-command — `/spec-kit-linear-seed`.
+command — `/speckit-linear-seed`.
 **Layer**: implements the install side of Layer D. The optional
 `--with-action` flag drops the Layer E template; the secret
 provisioning (`gh secret set LINEAR_API_TOKEN`) stays with the
@@ -244,8 +244,8 @@ parity with other speckit extensions.
        `linear-config.yml`.
      - **n / defer** — install completes; the structured summary
        carries an FR-022 warning row and the Next-steps block
-       directs the operator to `/spec-kit-linear-seed` before the
-       first `/spec-kit-linear-push`.
+       directs the operator to `/speckit-linear-seed` before the
+       first `/speckit-linear-push`.
      In `--non-interactive` (or `--no-prompt`) mode the install
      **halts** with the same FR-022 error rather than prompt, so CI
      never silently leaves the workspace half-installed.
@@ -291,7 +291,7 @@ parity with other speckit extensions.
 4. **Handle the exit code.** Per `contracts/command-shapes.md` §5.6:
    - `0` — install completed; all required dependencies green.
      Show the summary and direct the operator to run
-     `/spec-kit-linear-seed` next.
+     `/speckit-linear-seed` next.
    - `1` — recoverable transient failure (e.g. Linear API blip
      during the deferred `--auto-create` Project bootstrap, when
      enabled). Re-run.
@@ -323,7 +323,7 @@ AI agent executes. When the two diverge, prefer `quickstart.md`.
   consumer repo** at adoption time. Subsequent invocations are
   idempotent (re-running just re-verifies dependencies and reports
   drift).
-- **Not auto-fired.** Unlike `/spec-kit-linear-push`, this command is
+- **Not auto-fired.** Unlike `/speckit-linear-push`, this command is
   never wired to any `after_*` hook or git hook. It only runs when
   the operator explicitly invokes it.
 
@@ -388,8 +388,8 @@ Selected named cases:
   `workflow_state_uuids` and the install can't ask. Fix: re-run
   without `--non-interactive`, or run `bash src/seed.sh --team
   <UUID>` first and then re-invoke install.
-- `workspace seed deferred; run /spec-kit-linear-seed before
-  /spec-kit-linear-push (FR-022)` — warning (not an error). The
+- `workspace seed deferred; run /speckit-linear-seed before
+  /speckit-linear-push (FR-022)` — warning (not an error). The
   operator chose `n` at the T063 prompt; install completed but
   reconcile will halt until the seed runs.
 - `github-action template missing at <path>; cannot install Layer E`

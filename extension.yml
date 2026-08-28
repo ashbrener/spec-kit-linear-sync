@@ -8,7 +8,7 @@
 # `.specify/extensions/linear/`, registers the hooks below into the consumer's
 # `.specify/extensions.yml`, and (if the consumer initialised with
 # `--ai-skills`) auto-generates one SKILL.md per command under
-# `.claude/skills/spec-kit-linear-<sub>/`.
+# `.claude/skills/speckit-linear-<sub>/`.
 #
 # Mirrors the field shape of the sibling extension at
 # a sibling extension repo/extension.yml. Field names that
@@ -155,7 +155,7 @@ provides:
   # because reconcile is the single convergent operation — there is no
   # per-phase specialisation. The host agent runs `speckit-taskstoissues`'s
   # post-execution machinery to translate the dot-name into
-  # `/spec-kit-linear-push` and dispatch it.
+  # `/speckit-linear-push` and dispatch it.
   #
   # NO `before_*` hooks: this extension never pre-empts a lifecycle step,
   # it only follows them. (Contrast with speckit-red-team, which gates

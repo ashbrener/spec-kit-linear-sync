@@ -78,7 +78,7 @@ Default: `--all --human`.
      (Intel) is earlier on `PATH` than `/bin/bash`.
    - The consumer repo's config is present at
      `.specify/extensions/linear/linear-config.yml`. If absent,
-     surface "run `/spec-kit-linear-install` first" and exit 2; do NOT
+     surface "run `/speckit-linear-install` first" and exit 2; do NOT
      attempt to run the inspector.
    - `jq`, `curl`, and `git` are installed.
 
@@ -188,7 +188,7 @@ Default: `--all --human`.
      Recommend re-running once network connectivity is restored.
    - `2` — workspace config error (missing/malformed `linear-config.yml`).
      The script halted before any query. Surface the remediation the
-     script printed (typically: run `/spec-kit-linear-install`).
+     script printed (typically: run `/speckit-linear-install`).
    - `3` — transport failure. Linear was unreachable; the disk-side
      report still emits, but every Linear cell is empty.
 
@@ -198,7 +198,7 @@ Default: `--all --human`.
   chat. Primary path for "what's the state of this repo?" inspections,
   multi-repo coordination, and pre-push drift checks.
 - **Never auto-fired.** This is NOT wired into any `after_*` hook or
-  any git hook by `/spec-kit-linear-install` — running it on every
+  any git hook by `/speckit-linear-install` — running it on every
   lifecycle command would add latency to every spec edit without
   changing observable state. Operator-invoked only.
 

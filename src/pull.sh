@@ -780,7 +780,7 @@ main() {
     # be set to a real Project (the workspace scope sidesteps it).
     if ! config::load "$PULL_CONFIG_PATH"; then
         printf 'spec-kit-linear: pull: cannot load config at %s\n' "$PULL_CONFIG_PATH" >&2
-        printf 'hint: copy config-template.yml to %s and run /spec-kit-linear-install\n' \
+        printf 'hint: copy config-template.yml to %s and run /speckit-linear-install\n' \
             "$PULL_CONFIG_PATH" >&2
         summary::add error "config load failed: ${PULL_CONFIG_PATH}"
         summary::emit
@@ -809,7 +809,7 @@ main() {
         if [[ -z "$project_uuid" ]]; then
             printf 'spec-kit-linear: pull: --repo requires linear.project.id in %s\n' \
                 "$PULL_CONFIG_PATH" >&2
-            printf 'hint: run /spec-kit-linear-install to bind a Project, or use --workspace-wide\n' >&2
+            printf 'hint: run /speckit-linear-install to bind a Project, or use --workspace-wide\n' >&2
             summary::add error "linear.project.id missing for --repo scope"
             summary::emit
             exit 2

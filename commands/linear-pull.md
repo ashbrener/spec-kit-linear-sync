@@ -81,7 +81,7 @@ Default: `--repo --all-phases --human`.
      (Intel) is earlier on `PATH` than `/bin/bash`.
    - The consumer repo's config is present at
      `.specify/extensions/linear/linear-config.yml`. If absent,
-     surface "run `/spec-kit-linear-install` first" and exit 2; do NOT
+     surface "run `/speckit-linear-install` first" and exit 2; do NOT
      attempt to run the inspector.
    - `jq`, `curl`, and `git` are installed.
 
@@ -178,7 +178,7 @@ Default: `--repo --all-phases --human`.
      Recommend re-running once network connectivity is restored.
    - `2` — workspace config error (missing/malformed `linear-config.yml`).
      The script halted before any query. Surface the remediation the
-     script printed (typically: run `/spec-kit-linear-install`).
+     script printed (typically: run `/speckit-linear-install`).
    - `3` — transport failure. Linear was unreachable; no rows surfaced.
 
 ## When this command fires
@@ -188,7 +188,7 @@ Default: `--repo --all-phases --human`.
   workspace?", cross-repo coordination, and Project-level inventory
   checks before a release.
 - **Never auto-fired.** This is NOT wired into any `after_*` hook or
-  any git hook by `/spec-kit-linear-install`. Operator-invoked only.
+  any git hook by `/speckit-linear-install`. Operator-invoked only.
 
 ## Output channel discipline
 
@@ -210,7 +210,7 @@ Each failure mode is surfaced as a named warning in the summary
 - `config validation failed` — malformed UUIDs or missing fields. Exit 2.
 - `linear.project.id missing for --repo scope` — operator tried
   `--repo` against a workspace-wide-only config. Suggest
-  `--workspace-wide` or running `/spec-kit-linear-install` to bind a
+  `--workspace-wide` or running `/speckit-linear-install` to bind a
   Project. Exit 2.
 - `linear.team.id missing for --workspace-wide scope` — config has no
   team UUID. Exit 2.

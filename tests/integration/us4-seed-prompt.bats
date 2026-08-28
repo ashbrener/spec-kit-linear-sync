@@ -14,7 +14,7 @@
 #   THEN  the install:
 #           * detects the unseeded state (FR-022),
 #           * in interactive mode, prompts the operator with two
-#             paths — (default) run `/spec-kit-linear-seed` inline,
+#             paths — (default) run `/speckit-linear-seed` inline,
 #             or defer with a clear FR-022 notice,
 #           * in --non-interactive mode, halts with the FR-022 error
 #             and a copy-paste pointer to `bash src/seed.sh --team
@@ -27,7 +27,7 @@
 #       "Created: N" line lands in the install report.
 #   (2) interactive defer (operator types "n")       → install
 #       completes; summary carries an FR-022 warning row and the
-#       Next steps block names /spec-kit-linear-seed.
+#       Next steps block names /speckit-linear-seed.
 #
 # Maps to FR-022 + FR-027 + contracts/command-shapes.md §5.
 # =============================================================================
@@ -106,7 +106,7 @@ integration::run_install_with_input() {
 
     # ---- error names the missing seed surface ----
     [[ "$output" == *"workspace unseeded"* ]] || [[ "$output" == *"workflow_state_uuids"* ]]
-    [[ "$output" == *"src/seed.sh"* ]] || [[ "$output" == *"spec-kit-linear-seed"* ]]
+    [[ "$output" == *"src/seed.sh"* ]] || [[ "$output" == *"speckit-linear-seed"* ]]
 
     # ---- summary block flags the unseeded error ----
     [[ "$output" == *"Errors: 1"* ]] || [[ "$output" == *"workspace unseeded"* ]]
@@ -158,8 +158,8 @@ integration::run_install_with_input() {
         [[ "$output" == *"deferred"* ]] || \
         [[ "$output" == *"FR-022"* ]]
 
-    # Next-steps block names /spec-kit-linear-seed as the unblocker.
-    [[ "$output" == *"spec-kit-linear-seed"* ]] || \
+    # Next-steps block names /speckit-linear-seed as the unblocker.
+    [[ "$output" == *"speckit-linear-seed"* ]] || \
         [[ "$output" == *"speckit.linear.seed"* ]] || \
         [[ "$output" == *"seed"* ]]
 

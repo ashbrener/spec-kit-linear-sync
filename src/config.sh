@@ -338,7 +338,7 @@ config::load() {
 
     if [[ ! -e "${path}" ]]; then
         config::_die "file not found: ${path}
-hint: copy config-template.yml to ${path} and run \`/spec-kit-linear-install\` to populate UUIDs"
+hint: copy config-template.yml to ${path} and run \`/speckit-linear-install\` to populate UUIDs"
     fi
 
     if [[ ! -r "${path}" ]]; then
@@ -739,7 +739,7 @@ hint: valid phases are ${CONFIG_WORKFLOW_PHASES[*]}"
     local value="${CONFIG_VALUES[linear.workflow_state_uuids.${phase}]:-}"
     if [[ -z "${value}" ]]; then
         config::_die "${CONFIG_LOADED_PATH}: linear.workflow_state_uuids.${phase} is missing
-hint: run \`/spec-kit-linear-seed\` to re-capture workflow-state UUIDs"
+hint: run \`/speckit-linear-seed\` to re-capture workflow-state UUIDs"
     fi
     printf '%s\n' "${value}"
 }
@@ -772,14 +772,14 @@ hint: valid keys are ${CONFIG_DEFAULT_STATE_KEYS[*]}"
     local value="${CONFIG_VALUES[linear.default_state_uuids.${key}]:-}"
     if [[ -z "${value}" ]]; then
         config::_die "${CONFIG_LOADED_PATH}: linear.default_state_uuids.${key} is missing
-hint: run \`/spec-kit-linear-seed\` to capture stock team-state UUIDs (todo/in_progress/done)"
+hint: run \`/speckit-linear-seed\` to capture stock team-state UUIDs (todo/in_progress/done)"
     fi
     printf '%s\n' "${value}"
 }
 
 # config::get_agent_label_uuid <agent_family>
 # Echo the workspace label UUID for one of the canonical agent families
-# (`claude`, `codex`) captured by /spec-kit-linear-seed (FR-036). The
+# (`claude`, `codex`) captured by /speckit-linear-seed (FR-036). The
 # accessor is asymmetric on purpose:
 #   * Empty <agent_family> ⇒ echo empty + return 0. This is the
 #     "no AGENT_NAME / CLAUDE_CODE_MODEL / CODEX_MODEL env var resolved"
@@ -827,7 +827,7 @@ config::get_agent_label_uuid() {
 
     if (( block_present == 0 )); then
         config::_die "${CONFIG_LOADED_PATH}: linear.agent_label_uuids block is missing but an agent identifier ('${family}') was resolved
-hint: run \`/spec-kit-linear-seed\` to create the agent:* labels and capture their UUIDs (FR-036)"
+hint: run \`/speckit-linear-seed\` to create the agent:* labels and capture their UUIDs (FR-036)"
     fi
 
     # Block present but this specific family was not seeded — silently
@@ -906,7 +906,7 @@ config::validate() {
         elif ! [[ "${value}" =~ ${CONFIG_UUID_REGEX} ]]; then
             problems+=("${path}: ${field}: malformed UUID ('${value}')")
         elif [[ "${value}" == "00000000-0000-0000-0000-000000000000" ]]; then
-            problems+=("${path}: ${field}: still set to the zero placeholder UUID; run \`/spec-kit-linear-install\` to resolve it")
+            problems+=("${path}: ${field}: still set to the zero placeholder UUID; run \`/speckit-linear-install\` to resolve it")
         fi
     done
 
@@ -916,11 +916,11 @@ config::validate() {
         local key="linear.workflow_state_uuids.${phase}"
         local value="${CONFIG_VALUES[${key}]:-}"
         if [[ -z "${value}" ]]; then
-            problems+=("${path}: ${key}: missing (run \`/spec-kit-linear-seed\`)")
+            problems+=("${path}: ${key}: missing (run \`/speckit-linear-seed\`)")
         elif ! [[ "${value}" =~ ${CONFIG_UUID_REGEX} ]]; then
             problems+=("${path}: ${key}: malformed UUID ('${value}')")
         elif [[ "${value}" == "00000000-0000-0000-0000-000000000000" ]]; then
-            problems+=("${path}: ${key}: still set to the zero placeholder UUID; run \`/spec-kit-linear-seed\`")
+            problems+=("${path}: ${key}: still set to the zero placeholder UUID; run \`/speckit-linear-seed\`")
         fi
     done
 
@@ -944,7 +944,7 @@ config::validate() {
             elif ! [[ "${dvalue}" =~ ${CONFIG_UUID_REGEX} ]]; then
                 problems+=("${path}: ${dkey}: malformed UUID ('${dvalue}')")
             elif [[ "${dvalue}" == "00000000-0000-0000-0000-000000000000" ]]; then
-                problems+=("${path}: ${dkey}: still set to the zero placeholder UUID; run \`/spec-kit-linear-seed\`")
+                problems+=("${path}: ${dkey}: still set to the zero placeholder UUID; run \`/speckit-linear-seed\`")
             fi
         done
     fi

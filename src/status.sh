@@ -836,7 +836,7 @@ main() {
     # config per FR-022.
     if ! config::load "$STATUS_CONFIG_PATH"; then
         printf 'spec-kit-linear: status: cannot load config at %s\n' "$STATUS_CONFIG_PATH" >&2
-        printf 'hint: copy config-template.yml to %s and run /spec-kit-linear-install\n' \
+        printf 'hint: copy config-template.yml to %s and run /speckit-linear-install\n' \
             "$STATUS_CONFIG_PATH" >&2
         summary::add error "config load failed: ${STATUS_CONFIG_PATH}"
         summary::emit
