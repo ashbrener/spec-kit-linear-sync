@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed — false `merged` in the git-only merge probe
+
+The git-only fallback in `git_helpers::pr_state` (used whenever `gh` is absent or
+the branch has no PR yet) is a reachability heuristic, and it was reporting
+`merged` for branches that had not landed. Because `parser::lifecycle_phase`
+short-circuits a `merged` hint past the artifact ladder, each false positive drove
+a spec Issue to the terminal state — `completedAt` stamped, `phase:*` label
+stripped — with `Errors: 0` in the summary, so nothing signalled it.
+
+- **Fixed (partially, #90): a spec branch cut from the current trunk tip no longer
+  reports `merged`.** A branch with no commits of its own is trivially its own
+  ancestor, so plain reachability called it merged. A branch whose tip is
+  *identical* to the trunk tip is now indeterminate, and the artifact ladder
+  decides. **This does not close #90.** The same symptom still reproduces when the
+  branch was cut from a *stale* local trunk (zero own commits, tip behind
+  `origin/main` — any `fetch` without `pull`), because "never started" and "fully
+  merged" are the same shape in the commit graph. Closing that needs a signal from
+  outside the graph; the reproduction and the analysis are on #90.
+- **Fixed: an in-flight branch on a repo with no `origin/main` no longer reports
+  `merged`.** With `origin/main` absent, the probe compared the branch against the
+  upstream of `HEAD` — which, when the branch under test was the one checked out,
+  was the branch itself, and `--is-ancestor X X` is always true. Any trunk
+  candidate that *is* the branch under test (or a remote-tracking ref for it) is
+  now skipped.
+- **Added: `origin/HEAD` as a trunk fallback for repos whose default branch is
+  neither `main` nor `master`,** ranked *below* both conventional names — git never
+  refreshes `origin/HEAD` after a remote default-branch rename, so a master-era
+  clone can carry a stale `origin/HEAD` next to a live `origin/main`, and trusting
+  it there would lose real merges. Trunk order is now `origin/main` →
+  `origin/master` → `origin/HEAD` → upstream of `HEAD`.
+
+### Known cost of the above
+
+- **A fast-forward merge now reads indeterminate rather than `merged`.** It leaves
+  the trunk tip identical to the branch tip, i.e. the same graph as a branch that
+  never started, so the #90 guard cannot keep them apart. The lifecycle then comes
+  from the artifact ladder — a false negative (#72's direction) in place of the
+  false positive #90 reported. Squash- and rebase-merged branches were already
+  read as `open` for the same underlying reason, before and after this change.
+  Both are asserted in the unit tests so the trade stays visible.
+
 ## [0.8.0] — 2026-06-27 — Hook self-healing: stop silent auto-sync loss
 
 The community update path (`specify extension add linear --from <release-zip>

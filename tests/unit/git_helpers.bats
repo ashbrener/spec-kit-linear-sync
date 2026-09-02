@@ -25,6 +25,17 @@
 #   - git_helpers::pr_state via mocked gh -> merged
 #   - git_helpers::pr_state with gh absent + branch reachable -> merged
 #   - git_helpers::pr_state with gh absent + branch ahead -> open
+#   - git_helpers::pr_state with gh absent + branch tip identical to the
+#     trunk tip -> indeterminate, NOT merged (#90)
+#   - git_helpers::pr_state with gh absent + trunk itself -> indeterminate
+#   - git_helpers::pr_state trunk resolution via origin/HEAD on a repo whose
+#     default branch is neither `main` nor `master`
+#   - git_helpers::pr_state preferring origin/main over a STALE origin/HEAD
+#   - git_helpers::pr_state never comparing a branch against its own
+#     upstream (the other route to a false `merged`)
+#   - git_helpers::pr_state on a fast-forward merge -> indeterminate (the
+#     documented cost of the #90 guard, asserted so it cannot regress
+#     silently)
 #   - git_helpers::last_touched returns parseable ISO 8601
 # =============================================================================
 
@@ -433,6 +444,14 @@ EOF
   # the feature branch FROM main without any extra commits, push it, and
   # advance main past it so the feature branch's tip is reachable from
   # origin/main (i.e. effectively merged).
+  #
+  # NOTE (#90 residual): this fixture is ALSO the shape of a spec branch cut
+  # from a stale local trunk — zero commits of its own, tip behind the trunk
+  # — which is indistinguishable in the commit graph from the merged branch
+  # this test intends. The assertion below therefore records what the
+  # heuristic currently does, not what is desirable; the tip-equality guard
+  # (#90) only removes the case where the trunk has NOT moved. See the (c)
+  # block in src/git_helpers.sh.
   git -C "$REPO" init --bare --quiet "$ORIGIN"
   git -C "$REPO" remote add origin "$ORIGIN"
   git -C "$REPO" push --quiet origin main
@@ -468,6 +487,204 @@ EOF
   run git_helpers::pr_state '001-in-flight'
   [ "$status" -eq 0 ]
   [ "$output" = "open" ]
+}
+
+# -----------------------------------------------------------------------------
+# Helper: build a SECOND repo (+ bare origin) whose default branch is not
+# `main`, so the trunk-resolution order can be exercised. `origin/HEAD` is
+# written with `symbolic-ref` rather than `remote set-head -a` to keep the
+# test hermetic (no remote round-trip) and independent of git version.
+#
+# Echoes nothing; sets ALT / ALT_ORIGIN for the calling test.
+# -----------------------------------------------------------------------------
+_make_alt_default_branch_repo() {
+  local trunk="$1"
+  ALT="$BATS_TEST_TMPDIR/alt"
+  ALT_ORIGIN="$BATS_TEST_TMPDIR/alt-origin.git"
+  mkdir -p "$ALT"
+  git -C "$ALT" init --initial-branch="$trunk" --quiet
+  printf 'hello\n' > "$ALT/README.md"
+  git -C "$ALT" add README.md
+  git -C "$ALT" commit --quiet -m 'initial commit'
+  git -C "$ALT" init --bare --quiet "$ALT_ORIGIN"
+  git -C "$ALT" remote add origin "$ALT_ORIGIN"
+  git -C "$ALT" push --quiet origin "$trunk"
+  git -C "$ALT" symbolic-ref "refs/remotes/origin/HEAD" "refs/remotes/origin/$trunk"
+}
+
+# A branch cut from the trunk with nothing committed on it yet is trivially
+# its own ancestor, so plain reachability calls it "merged" — which drove a
+# brand-new spec straight to the terminal state on its first push (#90).
+# pr_state must decline to answer instead, leaving the artifact ladder in
+# charge.
+@test "pr_state emits nothing for a branch with zero commits of its own (#90)" {
+  cd "$REPO"
+  git -C "$REPO" init --bare --quiet "$ORIGIN"
+  git -C "$REPO" remote add origin "$ORIGIN"
+  git -C "$REPO" push --quiet origin main
+
+  # The reproduction from the issue: branch cut from origin/main, spec
+  # artifacts written but nothing committed, no PR.
+  git -C "$REPO" checkout --quiet -b '001-new-spec' 'refs/remotes/origin/main'
+  mkdir -p "$REPO/specs/001-new-spec"
+  printf '# Spec\n' > "$REPO/specs/001-new-spec/spec.md"
+
+  _strip_gh_from_path
+
+  run git_helpers::pr_state '001-new-spec'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# Same reasoning for the trunk itself: its tip IS the base tip.
+@test "pr_state emits nothing for the trunk itself (#90)" {
+  cd "$REPO"
+  git -C "$REPO" init --bare --quiet "$ORIGIN"
+  git -C "$REPO" remote add origin "$ORIGIN"
+  git -C "$REPO" push --quiet origin main
+
+  _strip_gh_from_path
+
+  run git_helpers::pr_state 'main'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# The #90 guard must not cost us real merge detection: a merged branch is
+# strictly BEHIND the trunk, so its tip differs from the trunk tip even when
+# the branch itself carried commits.
+@test "pr_state still reports 'merged' for a branch with commits that landed on the trunk" {
+  cd "$REPO"
+  git -C "$REPO" init --bare --quiet "$ORIGIN"
+  git -C "$REPO" remote add origin "$ORIGIN"
+  git -C "$REPO" push --quiet origin main
+
+  # Feature branch with a commit of its own...
+  _make_feature_branch '001-landed'
+  # ...merged into main with a merge commit, then pushed.
+  git -C "$REPO" checkout --quiet main
+  git -C "$REPO" merge --quiet --no-ff -m 'merge 001-landed' '001-landed'
+  git -C "$REPO" push --quiet origin main
+
+  _strip_gh_from_path
+
+  run git_helpers::pr_state '001-landed'
+  [ "$status" -eq 0 ]
+  [ "$output" = "merged" ]
+}
+
+# `origin/main` is a convention, not a guarantee. On a repo whose default
+# branch is `trunk` the old code found no origin/main and fell back to the
+# upstream of HEAD, which is the wrong question. origin/HEAD — the remote's
+# own declaration of its default branch — answers it, so merge detection
+# works there too.
+@test "pr_state resolves the trunk from origin/HEAD when the default is neither main nor master" {
+  _make_alt_default_branch_repo 'trunk'
+  cd "$ALT"
+
+  # Branch with a commit of its own, merged into trunk and pushed.
+  git -C "$ALT" checkout --quiet -b '002-on-trunk-repo'
+  printf 'work\n' >> "$ALT/README.md"
+  git -C "$ALT" commit --quiet -am 'work on 002'
+  git -C "$ALT" checkout --quiet trunk
+  git -C "$ALT" merge --quiet --no-ff -m 'merge 002' '002-on-trunk-repo'
+  git -C "$ALT" push --quiet origin trunk
+
+  _strip_gh_from_path
+
+  run git_helpers::pr_state '002-on-trunk-repo'
+  [ "$status" -eq 0 ]
+  [ "$output" = "merged" ]
+}
+
+# The other route to a false `merged`: with no origin/main or origin/master
+# to compare against, the upstream-of-HEAD fallback used to resolve to the
+# branch under test's OWN remote-tracking ref, and `--is-ancestor X X` is
+# always true, so in-flight work read `merged`. Skipping that candidate
+# leaves NO usable trunk in this repo, so the honest answer is indeterminate
+# — asserted exactly (a bare `!= merged` would pass on any output at all).
+@test "pr_state never compares a branch against its own upstream" {
+  _make_alt_default_branch_repo 'trunk'
+  cd "$ALT"
+  # Remove origin/HEAD so the only remaining candidate is the upstream of
+  # HEAD — i.e. the branch under test itself.
+  git -C "$ALT" update-ref -d 'refs/remotes/origin/HEAD'
+
+  git -C "$ALT" checkout --quiet -b '003-in-flight'
+  printf 'work\n' >> "$ALT/README.md"
+  git -C "$ALT" commit --quiet -am 'work on 003'
+  # NOT silenced: if the push fails the upstream is never configured and the
+  # test would exercise nothing.
+  git -C "$ALT" push --quiet --set-upstream origin '003-in-flight'
+
+  # Guard the fixture itself — the upstream must be the branch under test.
+  run git -C "$ALT" rev-parse --abbrev-ref '003-in-flight@{upstream}'
+  [ "$status" -eq 0 ]
+  [ "$output" = "origin/003-in-flight" ]
+
+  _strip_gh_from_path
+
+  run git_helpers::pr_state '003-in-flight'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
+}
+
+# origin/HEAD looks authoritative but git never refreshes it after a remote
+# default-branch rename, so a master-era clone keeps `origin/HEAD ->
+# origin/master` next to a live origin/main forever. Trusting it ahead of
+# the conventional names loses real merges: measuring a branch merged into
+# `main` against the abandoned `master` reports `open`.
+@test "pr_state prefers origin/main over a stale origin/HEAD" {
+  cd "$REPO"
+  git -C "$REPO" init --bare --quiet "$ORIGIN"
+  git -C "$REPO" remote add origin "$ORIGIN"
+  # Publish the old default, then rename to `main` and publish that, leaving
+  # origin/HEAD pointing at the abandoned `master` — exactly what a clone
+  # taken before the rename carries.
+  git -C "$REPO" branch --quiet -m main master
+  git -C "$REPO" push --quiet origin master
+  git -C "$REPO" branch --quiet -m master main
+  git -C "$REPO" push --quiet origin main
+  git -C "$REPO" symbolic-ref 'refs/remotes/origin/HEAD' 'refs/remotes/origin/master'
+
+  # A branch that genuinely landed on `main` (and never on `master`).
+  _make_feature_branch '005-landed-on-main'
+  git -C "$REPO" checkout --quiet main
+  git -C "$REPO" merge --quiet --no-ff -m 'merge 005' '005-landed-on-main'
+  git -C "$REPO" push --quiet origin main
+
+  _strip_gh_from_path
+
+  run git_helpers::pr_state '005-landed-on-main'
+  [ "$status" -eq 0 ]
+  [ "$output" = "merged" ]
+}
+
+# The documented cost of the #90 guard: a fast-forward merge leaves the
+# trunk tip IDENTICAL to the branch tip, which is the same graph as a branch
+# that never started, so it reads indeterminate rather than `merged`. That
+# is a false negative (the artifact ladder decides — #72's direction) traded
+# for the false positive #90 reported. Asserted so the trade stays visible
+# instead of being rediscovered as a bug.
+@test "pr_state is indeterminate for a fast-forward merge (known cost of the #90 guard)" {
+  cd "$REPO"
+  git -C "$REPO" init --bare --quiet "$ORIGIN"
+  git -C "$REPO" remote add origin "$ORIGIN"
+  git -C "$REPO" push --quiet origin main
+
+  _make_feature_branch '006-ff-merged'
+  git -C "$REPO" checkout --quiet main
+  git -C "$REPO" merge --quiet --ff-only '006-ff-merged'
+  git -C "$REPO" push --quiet origin main
+
+  # Fixture guard: the merge really was a fast-forward, i.e. tips coincide.
+  [ "$(git -C "$REPO" rev-parse '006-ff-merged')" = "$(git -C "$REPO" rev-parse 'refs/remotes/origin/main')" ]
+
+  _strip_gh_from_path
+
+  run git_helpers::pr_state '006-ff-merged'
+  [ "$status" -eq 0 ]
+  [ -z "$output" ]
 }
 
 # =============================================================================

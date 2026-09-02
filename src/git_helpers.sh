@@ -256,20 +256,51 @@ git_helpers::feature_number_for_branch() {
 #      now read from `state`/`mergedAt`, the real fields.
 #
 #   2. Otherwise (no `gh` binary, or `gh auth status` failing) fall back to
-#      a git-only branch-reachability probe:
-#        - "merged" if the branch tip is an ancestor of origin/main (or, if
-#          no `origin/main` ref exists, of the upstream of HEAD).
+#      a git-only branch-reachability probe against the trunk:
+#        - indeterminate (empty) when the branch tip is IDENTICAL to the
+#          trunk tip. A brand-new spec branch has that shape and must never
+#          be reported as merged (#90); so does a fast-forward merge, which
+#          consequently also reads indeterminate.
+#        - "merged" when the branch tip is a (strict) ancestor of the trunk
+#          tip.
 #        - "open" otherwise.
+#
+#      This probe is a HEURISTIC, and a partial one. "Never started" and
+#      "fully merged" are the same shape in the commit graph, so it cannot
+#      separate them: a branch cut from a stale local trunk carries no
+#      commits of its own and still reports `merged`, and a squash- or
+#      rebase-merged branch reports `open`. Only the exact-tip case above is
+#      resolved. See the (c) block in the body for the full accounting and
+#      why closing the rest needs a signal from outside the graph.
+#
+#      <branch> is resolved from `refs/heads/<branch>`, else whatever
+#      gitrevisions makes of the bare name; a branch with no local ref is
+#      indeterminate (see #72). `refs/remotes/origin/<branch>` is
+#      deliberately not consulted — see (a).
+#
+#      The trunk is resolved in this order: `origin/main`, `origin/master`,
+#      `origin/HEAD` (for repos whose default is neither), then the upstream
+#      of HEAD as a last-resort best effort. `origin/HEAD` ranks below the
+#      conventional names because git never refreshes it after a remote
+#      default-branch rename. A candidate that IS the branch under test (or
+#      a remote-tracking ref for it) is skipped: comparing a branch against
+#      itself always reports "merged", which is how an in-flight branch on a
+#      repo without `origin/main` used to land in Linear as Merged.
 #
 #      In the fallback path we have no signal on draft state or even on
 #      "does a PR exist at all" — git alone cannot answer those questions.
 #      We emit the bare word `merged` or `open` so the reconciler can still
 #      branch on the most operationally important distinction (has the
 #      change landed yet?) without conflating it with the richer JSON form.
+#      Downstream, `merged` is the only positive signal this path can
+#      produce — reconcile::pr_state_hint maps the bare `open` to the empty
+#      hint, so `open` and indeterminate both defer to the artifact ladder.
 #
-# Empty stdout (and exit 0) means "could not determine" — this happens
-# when neither `gh` nor any usable git base ref is available; callers
-# treat that as a soft warning per Principle VIII rather than an abort.
+# Empty stdout (and exit 0) means "could not determine": no `gh`, no usable
+# trunk ref, no local ref for the branch, or the tip-equality case in (c).
+# Callers treat it as "no PR signal" and fall through to the artifact
+# ladder; note that no caller currently WARNS on it, so an indeterminate
+# answer is silent (reconcile::pr_state_hint -> empty hint).
 # ---------------------------------------------------------------------------
 git_helpers::pr_state() {
   local branch="${1:-}"
@@ -308,39 +339,118 @@ git_helpers::pr_state() {
   fi
 
   # ----- Path 2: git-only branch-reachability fallback ------------------
-  # Try the conventional `origin/main` first because that's where 99% of
-  # PRs land. If that ref doesn't exist (fresh clone, non-standard
-  # default branch, no remote), fall back to the current branch's
-  # upstream as a best-effort base.
-  #
   # NOTE: we invoke git via the absolute path captured at module-source
   # time (see _GIT_HELPERS_GIT_BIN above) so the fallback works even when
   # the test harness has stripped /usr/bin from PATH to evict the `gh`
   # binary alongside it.
   local git_bin="${_GIT_HELPERS_GIT_BIN:-git}"
-  local base=''
-  if "$git_bin" rev-parse --verify --quiet refs/remotes/origin/main >/dev/null 2>&1; then
-    base='refs/remotes/origin/main'
-  elif "$git_bin" rev-parse --verify --quiet '@{upstream}' >/dev/null 2>&1; then
-    base=$("$git_bin" rev-parse --abbrev-ref '@{upstream}' 2>/dev/null || printf '')
+
+  # (a) Resolve <branch> to a concrete commit — the local ref first, then
+  #     whatever gitrevisions makes of the bare name. Resolving to a SHA up
+  #     front keeps the comparisons below from being skewed by an ambiguous
+  #     short name.
+  #
+  #     Deliberately NOT consulted: `refs/remotes/origin/<branch>`. It would
+  #     let us answer for a branch pruned locally (one strand of #72), but it
+  #     also makes the false-`merged` family in (c) reachable for a pushed
+  #     branch carrying no commits of its own — a routine state, since you
+  #     push a fresh branch to open the PR. Recovering #72's signal needs the
+  #     never-started/merged distinction solved first.
+  local branch_sha='' candidate
+  for candidate in "refs/heads/$branch" "$branch"; do
+    branch_sha=$("$git_bin" rev-parse --verify --quiet "${candidate}^{commit}" 2>/dev/null || printf '')
+    if [[ -n "$branch_sha" ]]; then
+      break
+    fi
+  done
+  if [[ -z "$branch_sha" ]]; then
+    # No such ref locally — we cannot answer. Caller treats empty as
+    # "indeterminate" and falls back to the artifact ladder (#72 covers the
+    # merge signals this loses).
+    return 0
   fi
 
-  if [[ -z "$base" ]]; then
+  # (b) Resolve the trunk we measure the branch against. The conventional
+  #     remote names come FIRST: `origin/HEAD` looks more authoritative (it
+  #     is the remote's own declaration of its default branch) but git never
+  #     refreshes it after a remote default-branch rename, so a master-era
+  #     clone can carry `origin/HEAD -> origin/master` alongside a live
+  #     `origin/main` indefinitely — trusting it there loses real merges.
+  #     It earns its place last, for repos whose default is neither `main`
+  #     nor `master`, ahead of the upstream of HEAD as a final best effort.
+  #
+  #     A candidate that IS the branch under test (its local ref or a
+  #     remote-tracking ref for it) is skipped: `--is-ancestor X X` is
+  #     always true, so comparing a branch against itself reports "merged"
+  #     for work that has not landed. That fires on a repo with no
+  #     `origin/main` when the branch under test is the one checked out with
+  #     an upstream of its own — the `@{upstream}` fallback then resolves to
+  #     the branch itself and drives a live spec to Merged.
+  local base_ref='' base_sha='' remote_head='' upstream_ref=''
+  remote_head=$("$git_bin" symbolic-ref --quiet refs/remotes/origin/HEAD 2>/dev/null || printf '')
+  upstream_ref=$("$git_bin" rev-parse --symbolic-full-name --verify --quiet '@{upstream}' 2>/dev/null || printf '')
+  for candidate in 'refs/remotes/origin/main' \
+                   'refs/remotes/origin/master' \
+                   "$remote_head" \
+                   "$upstream_ref"; do
+    [[ -n "$candidate" ]] || continue
+    # `[^/]+` keeps the skip to a remote-tracking ref FOR this branch —
+    # a bare `*` would also swallow e.g. refs/remotes/origin/release/<branch>.
+    # The quoted "$branch" is matched literally, not as a regex.
+    if [[ "$candidate" == "refs/heads/$branch" ]] \
+      || [[ "$candidate" =~ ^refs/remotes/[^/]+/"$branch"$ ]]; then
+      continue
+    fi
+    base_sha=$("$git_bin" rev-parse --verify --quiet "${candidate}^{commit}" 2>/dev/null || printf '')
+    if [[ -n "$base_sha" ]]; then
+      base_ref="$candidate"
+      break
+    fi
+  done
+
+  if [[ -z "$base_ref" ]]; then
     # No usable base ref — caller should treat this as "indeterminate"
     # and surface a warning rather than aborting.
     return 0
   fi
 
-  # The branch must actually exist locally for `git merge-base` to work
-  # in either direction. If it doesn't, we can't answer, so emit nothing.
-  if ! "$git_bin" rev-parse --verify --quiet "refs/heads/$branch" >/dev/null 2>&1 \
-    && ! "$git_bin" rev-parse --verify --quiet "$branch" >/dev/null 2>&1; then
+  # (c) A branch whose tip is IDENTICAL to the trunk tip is indeterminate.
+  #     That is how a brand-new spec — branch cut from the trunk, spec.md
+  #     written but not yet committed, no PR — landed in Linear as Merged on
+  #     its very first push (#90): parser::lifecycle_phase short-circuits a
+  #     `merged` hint straight past the artifact ladder to the terminal
+  #     state.
+  #
+  #     Read the limits of this guard honestly:
+  #
+  #     * It is NOT free. A branch merged by FAST-FORWARD leaves the trunk
+  #       tip identical to the branch tip, so it is the same graph as a
+  #       never-started branch and now reads indeterminate where it used to
+  #       read `merged`. That trades a false positive (unstarted work driven
+  #       terminal) for a false negative (landed work left to the artifact
+  #       ladder, i.e. #72's direction) — the safer side, but a real loss.
+  #     * It is NOT complete. A branch cut from a STALE local trunk has no
+  #       commits of its own yet its tip differs from the trunk tip, so it
+  #       still reports `merged` — the full #90 symptom, reachable after any
+  #       `fetch` without `pull`. Merge-by-squash and merge-by-rebase are the
+  #       mirror gap: the branch tip never enters the trunk's history, so
+  #       they read `open`.
+  #
+  #     Reachability alone cannot close either gap: "never started" and
+  #     "merged" are genuinely the same shape in the commit graph. Doing it
+  #     properly needs a signal from outside the graph (does this branch's
+  #     history carry a commit for `specs/NNN-*`?), which this primitive
+  #     cannot see — it is handed a branch name and nothing else. Tracked on
+  #     #90 rather than guessed at here.
+  if [[ "$branch_sha" == "$base_sha" ]]; then
     return 0
   fi
 
-  # `git merge-base --is-ancestor A B` returns 0 iff A is reachable from B.
-  # A branch is "merged" iff its tip commit is reachable from the base.
-  if "$git_bin" merge-base --is-ancestor "$branch" "$base" >/dev/null 2>&1; then
+  # (d) `git merge-base --is-ancestor A B` returns 0 iff A is reachable
+  #     from B. We report "merged" when the branch tip is reachable from the
+  #     trunk tip and the two differ — see (c) for what that does and does
+  #     not establish.
+  if "$git_bin" merge-base --is-ancestor "$branch_sha" "$base_sha" >/dev/null 2>&1; then
     printf 'merged\n'
   else
     printf 'open\n'
